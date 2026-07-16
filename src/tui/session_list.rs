@@ -119,8 +119,8 @@ impl SessionListScreen {
         let mut items: Vec<ListItem> = Vec::new();
 
         if !self.loaded {
-            let item = ListItem::new("Loading sessions...")
-                .style(Style::default().fg(COLORS.placeholder));
+            let item =
+                ListItem::new("Loading sessions...").style(Style::default().fg(COLORS.placeholder));
             items.push(item);
         } else {
             let new_lines = vec![Line::raw("  New Session"), Line::raw("")];
@@ -157,10 +157,7 @@ impl SessionListScreen {
                 if self.selected == idx {
                     items.push(ListItem::new(lines).style(Style::default().fg(accent)));
                 } else {
-                    items.push(
-                        ListItem::new(lines)
-                            .style(Style::default().fg(COLORS.muted)),
-                    );
+                    items.push(ListItem::new(lines).style(Style::default().fg(COLORS.muted)));
                 }
             }
         }

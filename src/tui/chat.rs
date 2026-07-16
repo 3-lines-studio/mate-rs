@@ -4,7 +4,7 @@ use crate::prompts::Template;
 use crate::render::StreamRenderer;
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Style},
+    style::Style,
     text::{Line, Text},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,

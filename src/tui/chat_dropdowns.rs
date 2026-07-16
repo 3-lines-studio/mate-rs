@@ -100,14 +100,10 @@ pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(S
         .enumerate()
         .map(|(i, (label, _))| {
             if i == dropdown.selected {
-                ListItem::new(format!(" {}", label)).style(
-                    Style::default()
-                        .bg(COLORS.selected)
-                        .fg(COLORS.accent),
-                )
-            } else {
                 ListItem::new(format!(" {}", label))
-                    .style(Style::default().fg(COLORS.muted))
+                    .style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
+            } else {
+                ListItem::new(format!(" {}", label)).style(Style::default().fg(COLORS.muted))
             }
         })
         .collect();
@@ -151,11 +147,7 @@ pub fn render_template_dropdown(
             };
             let text = format!(" {}{}", name, desc);
             if i == dropdown.selected {
-                ListItem::new(text).style(
-                    Style::default()
-                        .bg(COLORS.selected)
-                        .fg(COLORS.accent),
-                )
+                ListItem::new(text).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
             } else {
                 ListItem::new(text).style(Style::default().fg(COLORS.muted))
             }
@@ -195,14 +187,10 @@ pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(Stri
         .enumerate()
         .map(|(i, (path, _))| {
             if i == dropdown.selected {
-                ListItem::new(format!(" {}", path)).style(
-                    Style::default()
-                        .bg(COLORS.selected)
-                        .fg(COLORS.accent),
-                )
-            } else {
                 ListItem::new(format!(" {}", path))
-                    .style(Style::default().fg(COLORS.muted))
+                    .style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
+            } else {
+                ListItem::new(format!(" {}", path)).style(Style::default().fg(COLORS.muted))
             }
         })
         .collect();
@@ -258,11 +246,7 @@ pub fn render_tree_dropdown(
             let text = format!("{}{}{}", prefix, marker, label);
 
             if i == dropdown.selected {
-                ListItem::new(text).style(
-                    Style::default()
-                        .bg(COLORS.selected)
-                        .fg(COLORS.accent),
-                )
+                ListItem::new(text).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
             } else if *is_current {
                 ListItem::new(text).style(Style::default().fg(COLORS.accent))
             } else {

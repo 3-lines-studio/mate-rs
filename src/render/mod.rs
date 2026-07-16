@@ -247,9 +247,7 @@ impl StreamRenderer {
                 }
             }
 
-            if is_table_line(line)
-                || (tbl_state != TBL_NONE && looks_like_table_row(line))
-            {
+            if is_table_line(line) || (tbl_state != TBL_NONE && looks_like_table_row(line)) {
                 flush_para(&mut para_buf, &mut out, self);
                 match tbl_state {
                     TBL_NONE => {

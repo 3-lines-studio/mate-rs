@@ -152,10 +152,7 @@ impl App {
                 let name = &session.name;
                 let dialog = format!("Delete \"{}\"?\n\n[y] yes  [n] no  [esc] cancel", name);
                 let p = ratatui::widgets::Paragraph::new(dialog)
-                    .style(
-                        ratatui::style::Style::default()
-                            .fg(crate::tui::theme::COLORS.error),
-                    )
+                    .style(ratatui::style::Style::default().fg(crate::tui::theme::COLORS.error))
                     .block(
                         ratatui::widgets::Block::default()
                             .borders(ratatui::widgets::Borders::ALL)

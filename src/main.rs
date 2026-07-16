@@ -125,12 +125,13 @@ fn run_cmd(args: &[String]) {
         }
     }
 
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _enter = rt.enter();
+
     let sess = deps.store.create().unwrap();
     let mut asession = deps.new_session(sess);
 
     let mut events = asession.prompt(&final_prompt);
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
     while let Some(ev) = rt.block_on(events.recv()) {
         match ev.event_type.as_str() {
             "text_delta" => {

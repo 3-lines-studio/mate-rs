@@ -19,15 +19,9 @@ pub fn thinking_indicator(
 ) -> Line<'static> {
     let frame = SPINNER[ticks % SPINNER.len()];
     Line::from(vec![
-        Span::styled(
-            frame.to_string(),
-            Style::default().fg(COLORS.accent),
-        ),
+        Span::styled(frame.to_string(), Style::default().fg(COLORS.accent)),
         Span::raw(" "),
-        Span::styled(
-            label.to_string(),
-            Style::default().fg(COLORS.accent),
-        ),
+        Span::styled(label.to_string(), Style::default().fg(COLORS.accent)),
         Span::styled(
             format!(" ({:.0?})", elapsed),
             Style::default().fg(COLORS.placeholder),
