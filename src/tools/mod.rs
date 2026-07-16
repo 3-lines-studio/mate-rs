@@ -126,6 +126,27 @@ pub fn standard() -> Vec<Tool> {
     ]
 }
 
+const MAX_TOOL_OUTPUT_BYTES: usize = 200_000;
+
+fn truncate_output(s: String) -> String {
+    if s.len() <= MAX_TOOL_OUTPUT_BYTES {
+        return s;
+    }
+    let mut cut = MAX_TOOL_OUTPUT_BYTES;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let dropped = s.len() - cut;
+    let marker = format!(
+        "\n... (output truncated: {} of {} bytes dropped, {} byte limit. Re-call with a smaller limit/offset to paginate.)",
+        dropped, s.len(), MAX_TOOL_OUTPUT_BYTES
+    );
+    let mut out = String::with_capacity(cut + marker.len());
+    out.push_str(&s[..cut]);
+    out.push_str(&marker);
+    out
+}
+
 pub fn define_tool<P, F, Fut>(
     name: &str,
     description: &str,
@@ -153,7 +174,8 @@ where
                 Box::pin(async move {
                     let p = result
                         .map_err(|e| format!("invalid parameters for tool {}: {}", name, e))?;
-                    f(p).await
+                    let out = f(p).await?;
+                    Ok(truncate_output(out))
                 })
             },
         ),
@@ -399,5 +421,68 @@ mod tests {
                 names
             );
         }
+    }
+
+    #[test]
+    fn test_truncate_output_under_limit() {
+        let s = "a".repeat(100);
+        assert_eq!(truncate_output(s.clone()), s);
+    }
+
+    #[test]
+    fn test_truncate_output_at_limit() {
+        let s = "a".repeat(MAX_TOOL_OUTPUT_BYTES);
+        assert_eq!(truncate_output(s), "a".repeat(MAX_TOOL_OUTPUT_BYTES));
+    }
+
+    #[test]
+    fn test_truncate_output_over_limit() {
+        let s = "a".repeat(MAX_TOOL_OUTPUT_BYTES + 500);
+        let out = truncate_output(s.clone());
+        assert!(out.starts_with(&"a".repeat(MAX_TOOL_OUTPUT_BYTES)));
+        assert!(out.contains("output truncated"));
+        assert!(out.contains(&format!("{} byte limit", MAX_TOOL_OUTPUT_BYTES)));
+        assert!(out.contains("500 of"));
+        assert!(out.len() > s.len() - 500);
+        assert!(out.len() < s.len());
+    }
+
+    #[test]
+    fn test_truncate_output_multibyte_boundary() {
+        let mut s = String::from("a").repeat(MAX_TOOL_OUTPUT_BYTES - 4);
+        s.push_str("\u{1f600}\u{1f600}");
+        let out = truncate_output(s);
+        assert!(out.contains("output truncated"));
+        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_define_tool_applies_guard() {
+        let tool = define_tool(
+            "big",
+            "returns big",
+            HashMap::new(),
+            |p: ContextParams| async move { Ok(p.val) },
+        );
+        let huge = "x".repeat(MAX_TOOL_OUTPUT_BYTES + 100);
+        let result = (tool.execute)(serde_json::json!({"val": huge}))
+            .await
+            .unwrap();
+        assert!(result.contains("output truncated"));
+        assert!(result.contains("100 of"));
+    }
+
+    #[tokio::test]
+    async fn test_define_tool_guard_passes_small() {
+        let tool = define_tool(
+            "small",
+            "returns small",
+            HashMap::new(),
+            |p: ContextParams| async move { Ok(format!("ok {}", p.val)) },
+        );
+        let result = (tool.execute)(serde_json::json!({"val": "hi"}))
+            .await
+            .unwrap();
+        assert_eq!(result, "ok hi");
     }
 }

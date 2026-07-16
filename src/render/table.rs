@@ -240,10 +240,8 @@ fn write_row_lines(
 
         let sep = format!("{reset}{border_color}│{reset}");
         out.push_str(&format!(
-            "{border_color}│{reset} {}{} {} {border_color}│{reset}\n",
-            parts.join(&format!(" {} ", sep)),
-            border_color,
-            reset
+            "{border_color}│{reset} {} {border_color}│{reset}\n",
+            parts.join(&format!(" {} ", sep))
         ));
     }
 }

@@ -58,18 +58,37 @@ fn execute_edit(p: EditParams) -> Result<String, String> {
     let mut applied = 0;
 
     for edit in &p.edits {
-        let count = content.matches(&edit.old_text).count();
+        let matches: Vec<_> = content.match_indices(&edit.old_text).collect();
+        let count = matches.len();
         if count == 0 {
-            return Err(format!(
-                "oldText not found in {}: {:?}",
-                p.path, edit.old_text
+            let mut msg = format!("oldText not found in {}", p.path);
+            if let Some(hint) = find_similar_context(&content, &edit.old_text) {
+                msg.push_str(&format!("\n\nDid you mean:\n```\n{}\n```", hint));
+            }
+            msg.push_str(&format!(
+                "\n\nFile preview:\n```\n{}\n```",
+                build_file_preview(&content, 20)
             ));
+            return Err(msg);
         }
         if count > 1 {
-            return Err(format!(
-                "oldText found {} times in {}, must be unique: {:?}",
-                count, p.path, edit.old_text
-            ));
+            let mut msg = format!(
+                "oldText found {} times in {}, must be unique. Matches:",
+                count, p.path
+            );
+            for (i, (pos, _)) in matches.iter().enumerate().take(2) {
+                let line_num = count_lines_before(&content, *pos);
+                msg.push_str(&format!(
+                    "\n\nMatch {} (line {}):\n```\n{}\n```",
+                    i + 1,
+                    line_num,
+                    get_line_context(&content, line_num, 1)
+                ));
+            }
+            if count > 2 {
+                msg.push_str(&format!("\n\n...and {} more", count - 2));
+            }
+            return Err(msg);
         }
         content = content.replacen(&edit.old_text, &edit.new_text, 1);
         applied += 1;
@@ -79,6 +98,53 @@ fn execute_edit(p: EditParams) -> Result<String, String> {
         .map_err(|e| format!("write file {}: {}", p.path, e))?;
 
     Ok(format!("Applied {} edit(s) to {}", applied, p.path))
+}
+
+fn count_lines_before(content: &str, byte_pos: usize) -> usize {
+    content
+        .char_indices()
+        .take_while(|(i, _)| *i < byte_pos)
+        .filter(|(_, c)| *c == '\n')
+        .count()
+        + 1
+}
+
+fn get_line_context(content: &str, target_line: usize, context: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = target_line.saturating_sub(context + 1);
+    let end = (target_line + context).min(lines.len());
+    lines[start..end].join("\n")
+}
+
+fn find_similar_context(content: &str, search: &str) -> Option<String> {
+    let first_line = search.lines().next()?.trim();
+    if first_line.is_empty() {
+        return None;
+    }
+    for (i, line) in content.lines().enumerate() {
+        if line.contains(first_line) || first_line.contains(line.trim()) {
+            return Some(get_line_context(content, i + 1, 2));
+        }
+    }
+    None
+}
+
+fn build_file_preview(content: &str, max_lines: usize) -> String {
+    if content.is_empty() {
+        return "(file is empty)".to_string();
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    let preview_end = lines.len().min(max_lines);
+    let mut preview = lines[..preview_end]
+        .iter()
+        .enumerate()
+        .map(|(index, line)| format!("{:>4}: {}", index + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if lines.len() > preview_end {
+        preview.push_str(&format!("\n... ({} more lines)", lines.len() - preview_end));
+    }
+    preview
 }
 
 #[cfg(test)]
@@ -225,6 +291,93 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "line1\nmiddle\nline3\n"
         );
+    }
+
+    #[test]
+    fn test_edit_file_no_match_with_similar_hint() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "line1\nhello world\nline3\n").unwrap();
+
+        let result = execute_edit(EditParams {
+            path: path.to_string_lossy().to_string(),
+            edits: vec![EditOp {
+                old_text: "hello world extra".to_string(),
+                new_text: "x".to_string(),
+            }],
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("Did you mean"));
+    }
+
+    #[test]
+    fn test_edit_file_no_match_file_preview() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "line1\nline2\nline3\n").unwrap();
+
+        let result = execute_edit(EditParams {
+            path: path.to_string_lossy().to_string(),
+            edits: vec![EditOp {
+                old_text: "zzzzzzz".to_string(),
+                new_text: "x".to_string(),
+            }],
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("File preview"));
+        assert!(err.contains("   1: line1"));
+    }
+
+    #[test]
+    fn test_edit_file_empty_file_preview() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "").unwrap();
+
+        let result = execute_edit(EditParams {
+            path: path.to_string_lossy().to_string(),
+            edits: vec![EditOp {
+                old_text: "a".to_string(),
+                new_text: "b".to_string(),
+            }],
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("(file is empty)"));
+    }
+
+    #[test]
+    fn test_edit_file_multiple_matches_context() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "foo\nbar\nfoo\nbaz\nfoo\n").unwrap();
+
+        let result = execute_edit(EditParams {
+            path: path.to_string_lossy().to_string(),
+            edits: vec![EditOp {
+                old_text: "foo".to_string(),
+                new_text: "x".to_string(),
+            }],
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("Match 1 (line 1)"));
+        assert!(err.contains("Match 2"));
+    }
+
+    #[test]
+    fn test_edit_file_multiple_matches_more() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "x\nx\nx\nx\nx\n").unwrap();
+
+        let result = execute_edit(EditParams {
+            path: path.to_string_lossy().to_string(),
+            edits: vec![EditOp {
+                old_text: "x".to_string(),
+                new_text: "y".to_string(),
+            }],
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("...and 3 more"));
     }
 
     #[test]

@@ -236,14 +236,11 @@ impl StreamRenderer {
             }
 
             if tbl_state == TBL_NONE && is_table_delimiter(line) {
-                if let Some(header) = para_buf.last() {
-                    if header.contains('|') {
-                        let header = para_buf.pop().unwrap();
-                        flush_para(&mut para_buf, &mut out, self);
-                        tbl_buf = vec![header, line.to_string()];
-                        tbl_state = TBL_BODY;
-                        continue;
-                    }
+                if let Some(header) = para_buf.pop_if(|header| header.contains('|')) {
+                    flush_para(&mut para_buf, &mut out, self);
+                    tbl_buf = vec![header, line.to_string()];
+                    tbl_state = TBL_BODY;
+                    continue;
                 }
             }
 

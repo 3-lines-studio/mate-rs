@@ -1,6 +1,7 @@
 use crate::tools::define_tool;
 use crate::tools::Tool;
 use futures_util::StreamExt;
+use htmd::HtmlToMarkdown;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};
@@ -16,7 +17,7 @@ pub struct WebFetchParams {
 
 const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
 const DEFAULT_MAX_SIZE: i32 = 100_000;
-const MAX_MAX_SIZE: i32 = 500_000;
+const MAX_MAX_SIZE: i32 = 200_000;
 
 struct DnsCacheEntry {
     addrs: Vec<IpAddr>,
@@ -36,14 +37,14 @@ pub fn tool() -> Tool {
     );
     properties.insert(
         "max_size".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum bytes to return (default: 100000, max: 500000)"}),
+        serde_json::json!({"type": "integer", "description": "Maximum bytes to return (default: 100000, max: 200000)"}),
     );
     params.insert("properties".to_string(), serde_json::json!(properties));
     params.insert("required".to_string(), serde_json::json!(["url"]));
 
     define_tool(
         "web_fetch",
-        "Fetch a URL and return its text content. Automatically uses a headless browser if the page appears to be a JavaScript SPA.",
+        "Fetch a URL and return its content as Markdown. Automatically uses a headless browser if the page appears to be a JavaScript SPA.",
         params,
         |p: WebFetchParams| async move { execute_webfetch(p).await },
     )
@@ -55,6 +56,25 @@ async fn execute_webfetch(mut p: WebFetchParams) -> Result<String, String> {
 
     if looks_like_spa_shell(&result) {
         return Ok(result);
+    }
+
+    let is_html = result
+        .lines()
+        .find(|l| l.starts_with("Content-Type:"))
+        .map(|l| l.contains("text/html"))
+        .unwrap_or(false);
+
+    if is_html {
+        if let Some((header, body)) = result.split_once("\n\n") {
+            match HtmlToMarkdown::builder()
+                .skip_tags(vec!["script", "style"])
+                .build()
+                .convert(body)
+            {
+                Ok(md) => return Ok(format!("{}\n\n{}", header, md)),
+                Err(_) => return Ok(result),
+            }
+        }
     }
 
     Ok(result)
@@ -395,7 +415,7 @@ mod tests {
         assert!(validate_and_clamp_url("https://x.com", &mut max_size)
             .await
             .is_ok());
-        assert_eq!(max_size, 500000);
+        assert_eq!(max_size, 200000);
     }
 
     #[test]
@@ -625,5 +645,50 @@ mod tests {
             host_from_url("https://[::1]:8080/path"),
             Some("::1".to_string())
         );
+    }
+
+    #[test]
+    fn test_html_to_markdown_conversion() {
+        let result = "HTTP 200 OK\nContent-Type: text/html; charset=utf-8\n\n<html><head><script>console.log('x')</script><style>.a{}</style></head><body><h1>Hello</h1><p>World <strong>bold</strong>.</p></body></html>";
+        let (header, html) = result.split_once("\n\n").unwrap();
+        let md = HtmlToMarkdown::builder()
+            .skip_tags(vec!["script", "style"])
+            .build()
+            .convert(html)
+            .unwrap();
+        let body = format!("{}\n\n{}", header, md);
+        assert!(body.starts_with("HTTP 200 OK\nContent-Type: text/html; charset=utf-8\n\n"));
+        let body_content = body.split_once("\n\n").unwrap().1;
+        assert!(
+            body_content.contains("# Hello"),
+            "expected heading, got: {}",
+            body_content
+        );
+        assert!(
+            body_content.contains("**bold**"),
+            "expected bold, got: {}",
+            body_content
+        );
+        assert!(
+            !body_content.contains("console.log"),
+            "script not skipped: {}",
+            body_content
+        );
+        assert!(
+            !body_content.contains(".a{}"),
+            "style not skipped: {}",
+            body_content
+        );
+    }
+
+    #[test]
+    fn test_non_html_not_converted() {
+        let result = "HTTP 200 OK\nContent-Type: application/json\n\n{\"key\":\"value\"}";
+        let is_html = result
+            .lines()
+            .find(|l| l.starts_with("Content-Type:"))
+            .map(|l| l.contains("text/html"))
+            .unwrap_or(false);
+        assert!(!is_html, "application/json should not be detected as HTML");
     }
 }

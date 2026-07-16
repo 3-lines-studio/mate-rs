@@ -53,15 +53,22 @@ pub fn tool() -> Tool {
 
 fn read_file_lines(p: &ReadFileParams) -> Result<(String, i32), String> {
     let f = std::fs::File::open(&p.path).map_err(|e| format!("read file {}: {}", p.path, e))?;
-    let reader = std::io::BufReader::with_capacity(1024 * 1024, f);
+    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, f);
 
-    let mut lines: Vec<String> = Vec::new();
+    let mut out: Vec<u8> = Vec::new();
     let mut line_num: i32 = 0;
     let start = p.offset - 1;
     let end = start + p.limit;
+    let mut buf = Vec::with_capacity(1024);
 
-    for line_result in reader.lines() {
-        let line = line_result.map_err(|e| format!("read file {}: {}", p.path, e))?;
+    loop {
+        buf.clear();
+        let n = reader
+            .read_until(b'\n', &mut buf)
+            .map_err(|e| format!("read file {}: {}", p.path, e))?;
+        if n == 0 {
+            break;
+        }
         line_num += 1;
         if line_num <= start {
             continue;
@@ -69,14 +76,14 @@ fn read_file_lines(p: &ReadFileParams) -> Result<(String, i32), String> {
         if p.limit > 0 && line_num > end {
             continue;
         }
-        lines.push(line);
+        out.extend_from_slice(&buf);
     }
 
-    if lines.is_empty() && p.offset > line_num {
+    if out.is_empty() && p.offset > line_num {
         return Ok((String::new(), line_num));
     }
 
-    Ok((lines.join("\n"), line_num))
+    Ok((String::from_utf8_lossy(&out).into_owned(), line_num))
 }
 
 #[cfg(test)]
@@ -201,7 +208,7 @@ mod tests {
             limit: 0,
         })
         .unwrap();
-        assert_eq!(content, "b\nc");
+        assert_eq!(content, "b\nc\n");
     }
 
     #[test]

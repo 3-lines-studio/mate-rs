@@ -739,7 +739,6 @@ impl AgentSession {
                 });
             } else {
                 let tools = self.tools.clone();
-                let compaction_client = self.compaction_client.clone();
 
                 set.spawn(async move {
                     let start = std::time::Instant::now();
@@ -759,15 +758,7 @@ impl AgentSession {
                             let dur = format_duration(start.elapsed());
                             match tool_result {
                                 Ok(Ok(result)) => {
-                                    let final_result = if tc.name == "web_fetch" {
-                                        if let Some(ref cc) = compaction_client {
-                                            compact_web_fetch_result(cc, &result).await
-                                        } else {
-                                            result
-                                        }
-                                    } else {
-                                        result
-                                    };
+                                    let final_result = result;
                                     let _ = events
                                         .send(Event::tool_result_ev(&tc, &final_result, &dur))
                                         .await;
@@ -1419,21 +1410,6 @@ fn build_delegate_def(names: &[String], descriptions: &HashMap<String, String>) 
 
 // ── compaction helpers ────────────────────────────────────────────────────
 
-async fn compact_web_fetch_result(client: &Arc<dyn ChatClient>, raw: &str) -> String {
-    let prompt = build_web_fetch_compaction_prompt(raw);
-    match call_compaction(client, &prompt).await {
-        Ok(compacted) => {
-            const PREFIX: &str = "[COMPACTED web_fetch]\n";
-            if compacted.is_empty() || PREFIX.len() + compacted.len() >= raw.len() {
-                raw.into()
-            } else {
-                format!("{}{}", PREFIX, compacted)
-            }
-        }
-        Err(_) => raw.into(),
-    }
-}
-
 async fn call_compaction(client: &Arc<dyn ChatClient>, prompt: &str) -> Result<String, String> {
     let req = ChatRequest {
         model: String::new(),
@@ -1472,10 +1448,6 @@ async fn call_compaction(client: &Arc<dyn ChatClient>, prompt: &str) -> Result<S
         }
     }
     Ok(result)
-}
-
-fn build_web_fetch_compaction_prompt(raw: &str) -> String {
-    format!("Extract the useful content from this web page for a coding agent. Strip navigation, ads, scripts, stylesheets, and boilerplate. Preserve documentation, API references, code examples, factual information, and any structured data. Output the extracted content only, no preamble.\n\n---\n\n{}", raw)
 }
 
 fn build_summarization_prompt(turns: &[Turn]) -> String {

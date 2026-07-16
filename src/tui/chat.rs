@@ -371,29 +371,43 @@ impl ChatScreen {
     fn render_message_ansi(&self, msg: &ChatMsg) -> String {
         match msg.role.as_str() {
             "user" => {
-                let user_accent = "\x1b[38;2;200;200;200m";
-                let text_fg = "\x1b[38;2;225;225;225m";
+                let full_w = (self.width as usize).saturating_sub(3);
+                let (r, g, b) =
+                    crate::render::block::hex_to_rgb(crate::render::theme::VESPER.surface);
+                let bg = format!("\x1b[48;2;{r};{g};{b}m");
                 let reset = "\x1b[0m";
-                let w = (self.width as usize).saturating_sub(5).max(20);
-                let mut lines = Vec::new();
-                let mut first = true;
-                for raw in msg.content.trim().split('\n') {
-                    for line in crate::render::block::wordwrap(raw, w, "").lines() {
-                        if first {
-                            lines.push(format!("{user_accent}❯{reset} {text_fg}{line}{reset}"));
-                            first = false;
-                        } else {
-                            lines.push(format!("  {text_fg}{line}{reset}"));
-                        }
-                    }
+                let pad_line = format!("{bg}{}{reset}", " ".repeat(full_w));
+                let rendered = self.renderer.render(msg.content.trim());
+                let re_bg = rendered.replace(reset, &format!("{reset}{bg}"));
+                let mut lines = vec![pad_line.clone()];
+                for line in re_bg.lines() {
+                    let vw = crate::render::block::visible_width(line);
+                    let pad = full_w.saturating_sub(vw + 1);
+                    lines.push(format!("{bg} {line}{}{reset}", " ".repeat(pad)));
                 }
+                lines.push(pad_line);
                 lines.join("\n")
             }
             "assistant" => self.render_assistant_turn(msg),
             "error" => {
+                let full_w = (self.width as usize).saturating_sub(3);
+                let (r, g, b) = crate::render::block::hex_to_rgb("#3a1d1d");
+                let bg = format!("\x1b[48;2;{r};{g};{b}m");
                 let red = "\x1b[38;2;247;118;142m";
                 let reset = "\x1b[0m";
-                format!("{red}{}{reset}", msg.content)
+                let pad_line = format!("{bg}{}{reset}", " ".repeat(full_w));
+                let mut lines = vec![pad_line.clone()];
+                for raw in msg.content.trim().split('\n') {
+                    for line in
+                        crate::render::block::wordwrap(raw, full_w.saturating_sub(2), "").lines()
+                    {
+                        let vw = crate::render::block::visible_width(line);
+                        let pad = full_w.saturating_sub(vw + 1);
+                        lines.push(format!("{bg} {red}{line}{}{reset}", " ".repeat(pad)));
+                    }
+                }
+                lines.push(pad_line);
+                lines.join("\n")
             }
             _ => String::new(),
         }
@@ -439,6 +453,7 @@ impl ChatScreen {
                         collapsed,
                         width,
                         0,
+                        0,
                     );
                     if !seg.children.is_empty() {
                         if collapsed {
@@ -459,6 +474,7 @@ impl ChatScreen {
                                     false,
                                     width,
                                     2,
+                                    0,
                                 ));
                             }
                         }
@@ -513,6 +529,7 @@ impl ChatScreen {
                         collapsed,
                         width,
                         0,
+                        self.wait_ticks,
                     );
                     if !lb.children.is_empty() {
                         if collapsed {
@@ -533,6 +550,7 @@ impl ChatScreen {
                                     false,
                                     width,
                                     2,
+                                    self.wait_ticks,
                                 ));
                             }
                         }

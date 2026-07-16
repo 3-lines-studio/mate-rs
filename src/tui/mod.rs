@@ -12,8 +12,8 @@ use crate::core::Deps;
 use crate::message::Message;
 use crate::session::Session;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEventKind,
-    KeyModifiers, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
 use std::time::{Duration, Instant};
@@ -58,7 +58,7 @@ impl App {
         let _enter = runtime.enter();
 
         let mut terminal = ratatui::init();
-        execute!(std::io::stdout(), EnableMouseCapture)?;
+        execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
         terminal.clear()?;
 
         self.session_list.load(&mut self.deps.store);
@@ -105,7 +105,11 @@ impl App {
             }
         }
 
-        execute!(std::io::stdout(), DisableMouseCapture)?;
+        execute!(
+            std::io::stdout(),
+            DisableBracketedPaste,
+            DisableMouseCapture
+        )?;
         ratatui::restore();
         Ok(())
     }
@@ -432,6 +436,13 @@ impl App {
                         _ => {}
                     }
                 }
+            }
+            CrosstermEvent::Paste(s)
+                if matches!(self.state, AppState::Chat)
+                    && !self.chat.waiting
+                    && self.chat.active_modal == Modal::None =>
+            {
+                self.chat.insert_str(&s);
             }
             _ => {}
         }
