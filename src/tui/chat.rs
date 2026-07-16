@@ -345,6 +345,8 @@ impl ChatScreen {
             self.viewport_offset = max_offset;
             self.scroll_to_bottom = false;
             self.user_scrolled_up = false;
+        } else if !self.user_scrolled_up {
+            self.viewport_offset = max_offset;
         }
         if self.viewport_offset > max_offset {
             self.viewport_offset = max_offset;
@@ -583,18 +585,28 @@ impl ChatScreen {
 
             let branch_or_cwd = crate::tui::chat_render::git_branch(&self.cwd)
                 .unwrap_or_else(|| shorten_cwd_string(&self.cwd));
-            let info_text = format!(" {} · {} ", self.model_name, branch_or_cwd);
             let border_color = Color::from_u32(0x00505058);
+            let dim = Style::default().fg(Color::from_u32(0x006C6C6C));
+
+            let mut parts = vec![format!(
+                "{} / {}",
+                fmt_tokens(self.total_tokens),
+                fmt_tokens(self.context_window),
+            )];
+            if self.cache_hit_tokens > 0 {
+                parts.push(format!("cache {}", fmt_tokens(self.cache_hit_tokens)));
+            }
+            parts.push(fmt_cost(self.total_cost));
+            let stats = Line::styled(format!(" {} ", parts.join(" · ")), dim).left_aligned();
+            let info = Line::styled(format!(" {} · {} ", self.model_name, branch_or_cwd), dim)
+                .right_aligned();
 
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color))
-                .title_bottom(ratatui::text::Line::styled(
-                    info_text,
-                    Style::default().fg(Color::from_u32(0x006C6C6C)),
-                ))
-                .title_alignment(ratatui::layout::Alignment::Right);
+                .title_bottom(stats)
+                .title_bottom(info);
 
             if let Some(h2) = fit_height(area, top, prompt_h) {
                 let prompt_area = Rect::new(
@@ -995,6 +1007,30 @@ fn shorten_cwd_string(cwd: &str) -> String {
     cwd.to_string()
 }
 
+fn fmt_tokens(n: i32) -> String {
+    let n = n as f64;
+    if n >= 1_000_000.0 {
+        format!("{:.1}M", n / 1_000_000.0)
+    } else if n >= 1000.0 {
+        let v = n / 1000.0;
+        if v.fract() == 0.0 {
+            format!("{:.0}k", v)
+        } else {
+            format!("{:.1}k", v)
+        }
+    } else {
+        format!("{}", n as i32)
+    }
+}
+
+fn fmt_cost(c: f64) -> String {
+    if c < 0.01 {
+        format!("${:.4}", c)
+    } else {
+        format!("${:.2}", c)
+    }
+}
+
 fn wrap_line(line: &str, max_w: usize) -> Vec<(usize, usize)> {
     if max_w == 0 {
         return vec![(0, 0)];
@@ -1308,5 +1344,49 @@ mod tests {
         let (crow, _) = textarea_cursor_xy(&s.textarea, s.cursor, 76);
         assert!((crow as usize) >= s.textarea_scroll);
         assert!((crow as usize) < s.textarea_scroll + s.textarea_height as usize);
+    }
+
+    #[test]
+    fn follows_new_messages_to_bottom_when_not_scrolled() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_size(80, 24);
+        for _ in 0..40 {
+            s.add_message("user", &"word ".repeat(200));
+        }
+        render_to(&mut s, 80, 24);
+        assert!(!s.user_scrolled_up);
+        let max_after = s.viewport_offset;
+        assert!(max_after > 0);
+
+        // append more content while at the bottom -> view must follow
+        for _ in 0..20 {
+            s.add_message("user", &"word ".repeat(200));
+        }
+        render_to(&mut s, 80, 24);
+        assert!(!s.user_scrolled_up);
+        assert!(s.viewport_offset > max_after);
+    }
+
+    #[test]
+    fn stays_pinned_when_user_scrolled_up() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_size(80, 24);
+        for _ in 0..40 {
+            s.add_message("user", &"word ".repeat(200));
+        }
+        render_to(&mut s, 80, 24);
+
+        // user scrolls up
+        s.user_scrolled_up = true;
+        s.viewport_offset = s.viewport_offset.saturating_sub(20);
+        let pinned = s.viewport_offset;
+
+        // new content appended -> view must NOT follow
+        for _ in 0..20 {
+            s.add_message("user", &"word ".repeat(200));
+        }
+        render_to(&mut s, 80, 24);
+        assert!(s.user_scrolled_up);
+        assert_eq!(s.viewport_offset, pinned);
     }
 }

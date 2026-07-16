@@ -3,6 +3,7 @@ use crate::session::Session;
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
+    text::Line,
     widgets::{Block, List, ListItem, Paragraph},
     Frame,
 };
@@ -65,7 +66,7 @@ impl SessionListScreen {
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let accent = Color::from_u32(0x00BB9AF7);
 
-        if area.height >= 16 {
+        if area.height >= 18 {
             self.render_welcome(f, area, accent);
         } else {
             self.render_compact(f, area, accent);
@@ -121,11 +122,11 @@ impl SessionListScreen {
                 .style(Style::default().fg(Color::from_u32(0x006C6C6C)));
             items.push(item);
         } else {
+            let new_lines = vec![Line::raw("  New Session"), Line::raw("")];
             let new_item = if self.selected == 0 {
-                ListItem::new("  New Session").style(Style::default().fg(accent))
+                ListItem::new(new_lines).style(Style::default().fg(accent))
             } else {
-                ListItem::new("  New Session")
-                    .style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
+                ListItem::new(new_lines).style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
             };
             items.push(new_item);
 
@@ -146,13 +147,18 @@ impl SessionListScreen {
                         s.updated_at.format("%Y-%m-%d %H:%M")
                     )
                 };
-                let text = format!("  {}\n    {}", name, desc);
+                let lines = vec![
+                    Line::raw(format!("  {}", name)),
+                    Line::raw(format!("    {}", desc)),
+                    Line::raw(""),
+                ];
 
                 if self.selected == idx {
-                    items.push(ListItem::new(text).style(Style::default().fg(accent)));
+                    items.push(ListItem::new(lines).style(Style::default().fg(accent)));
                 } else {
                     items.push(
-                        ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00C8C8C8))),
+                        ListItem::new(lines)
+                            .style(Style::default().fg(Color::from_u32(0x00C8C8C8))),
                     );
                 }
             }

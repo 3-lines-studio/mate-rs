@@ -122,9 +122,9 @@ impl App {
                 );
                 let list_area = ratatui::layout::Rect::new(
                     area.x,
-                    area.y + 1,
+                    area.y + 2,
                     area.width,
-                    area.height.saturating_sub(2),
+                    area.height.saturating_sub(4),
                 );
                 self.session_list.render(f, list_area);
                 let shortcuts_area = ratatui::layout::Rect::new(
