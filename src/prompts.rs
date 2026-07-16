@@ -129,9 +129,7 @@ pub fn expand_text(templates: &[Template], text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '/'
-            && (i == 0 || is_text_space_char(chars[i - 1]))
-        {
+        if chars[i] == '/' && (i == 0 || is_text_space_char(chars[i - 1])) {
             let mut j = i + 1;
             while j < chars.len() && !is_text_space_char(chars[j]) {
                 j += 1;
@@ -147,9 +145,7 @@ pub fn expand_text(templates: &[Template], text: &str) -> String {
                 let args: Vec<String> = if rest.is_empty() {
                     Vec::new()
                 } else {
-                    rest.split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect()
+                    rest.split_whitespace().map(|s| s.to_string()).collect()
                 };
                 let expanded = expand(t, &args);
                 result.push_str(&expanded);

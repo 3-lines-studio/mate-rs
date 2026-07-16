@@ -122,12 +122,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("out.txt");
 
-        let result =
-            execute_write(WriteFileParams {
-                path: path.to_string_lossy().to_string(),
-                content: "hello".to_string(),
-            })
-            .unwrap();
+        let result = execute_write(WriteFileParams {
+            path: path.to_string_lossy().to_string(),
+            content: "hello".to_string(),
+        })
+        .unwrap();
         assert!(result.contains("Wrote"));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
     }
@@ -164,12 +163,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("empty.txt");
 
-        let result =
-            execute_write(WriteFileParams {
-                path: path.to_string_lossy().to_string(),
-                content: String::new(),
-            })
-            .unwrap();
+        let result = execute_write(WriteFileParams {
+            path: path.to_string_lossy().to_string(),
+            content: String::new(),
+        })
+        .unwrap();
         assert!(result.contains("0 bytes"));
     }
 

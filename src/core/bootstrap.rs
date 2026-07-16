@@ -34,13 +34,9 @@ pub fn init_with_config(
     let hash = hex::encode(&hasher.finalize()[..8]);
     let store = Store::new(&format!("{}/{}", store_dir, hash))?;
 
-    let (client, model_name) = resolve_client(
-        &cfg.agent.model,
-        &cfg.models,
-        &cfg.providers,
-        verbose,
-    )
-    .map_err(|e| format!("main model: {}", e))?;
+    let (client, model_name) =
+        resolve_client(&cfg.agent.model, &cfg.models, &cfg.providers, verbose)
+            .map_err(|e| format!("main model: {}", e))?;
 
     let mut compaction_client = None;
     if !cfg.agent.compaction_model.is_empty() {
@@ -126,7 +122,8 @@ pub fn init(
         .to_string_lossy()
         .to_string();
 
-    let system_prompt = agent::build_system_prompt(&system_md, &global_md, &local_md, &cfg.agent.prompt);
+    let system_prompt =
+        agent::build_system_prompt(&system_md, &global_md, &local_md, &cfg.agent.prompt);
 
     let session_dir = cfg.session.dir.clone();
     let mut deps = init_with_config(cfg, system_prompt, &cwd, &session_dir, verbose)?;

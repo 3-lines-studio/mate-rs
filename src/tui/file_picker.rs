@@ -11,7 +11,8 @@ pub fn index_files(root: &str) -> Vec<String> {
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
             if e.file_type().is_dir() {
-                if name == ".git" || name == "node_modules" || name == "vendor" || name == "target" {
+                if name == ".git" || name == "node_modules" || name == "vendor" || name == "target"
+                {
                     return false;
                 }
                 let rel = e.path().strip_prefix(root).unwrap_or(e.path());
@@ -30,7 +31,7 @@ pub fn index_files(root: &str) -> Vec<String> {
                 return false;
             }
             files.push(rel_str);
-            return true;
+            true
         })
     {
         let _ = entry;

@@ -28,8 +28,7 @@ impl SessionManager {
     pub fn get_or_create(
         &mut self,
         key: &str,
-    ) -> Result<Arc<std::sync::Mutex<AgentSession>>, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<Arc<std::sync::Mutex<AgentSession>>, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(sess) = self.cache.get(key) {
             return Ok(sess.clone());
         }

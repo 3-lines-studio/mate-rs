@@ -218,11 +218,14 @@ async fn notify(notifier: &Arc<dyn Notifier + Send + Sync>, channel: &str, messa
     let n = notifier.clone();
     let ch = channel.to_string();
     let msg = message.to_string();
-    let _ = tokio::time::timeout(NOTIFY_TIMEOUT, tokio::task::spawn_blocking(move || {
-        if let Err(e) = n.schedule_notify(&ch, &msg) {
-            log::error!("schedule notify failed channel={} err={}", ch, e);
-        }
-    }))
+    let _ = tokio::time::timeout(
+        NOTIFY_TIMEOUT,
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = n.schedule_notify(&ch, &msg) {
+                log::error!("schedule notify failed channel={} err={}", ch, e);
+            }
+        }),
+    )
     .await;
 }
 
@@ -373,7 +376,7 @@ fn next_fire<Tz: TimeZone>(spec: &CronSpec, after: &DateTime<Tz>) -> Option<Date
         if cron_matches(spec, &t) {
             return Some(t);
         }
-        t = t + chrono::Duration::minutes(1);
+        t += chrono::Duration::minutes(1);
     }
     None
 }
@@ -462,7 +465,7 @@ mod tests {
         let nf = next_fire(&spec, &base).unwrap();
         assert_eq!(nf.hour(), 9);
         let wd = (nf.weekday() as u32 + 1) % 7;
-        assert!(wd >= 1 && wd <= 5, "expected weekday, got {}", wd);
+        assert!((1..=5).contains(&wd), "expected weekday, got {}", wd);
     }
 
     #[test]
@@ -483,4 +486,3 @@ mod tests {
         assert_eq!(nf.day(), 15);
     }
 }
-

@@ -1,23 +1,21 @@
-use std::time::Instant;
-use ratatui::{
-    layout::{Alignment, Rect},
-    style::{Color, Style},
-    text::{Line, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
-};
 use crate::agent::{AgentSession, Event};
 use crate::message::Message;
 use crate::prompts::Template;
 use crate::render::StreamRenderer;
+use ratatui::{
+    layout::{Alignment, Rect},
+    style::{Color, Style},
+    text::{Line, Text},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    Frame,
+};
+use std::time::Instant;
 
 use super::chat_dropdowns::{
     render_command_dropdown, render_file_dropdown, render_template_dropdown, Dropdown, COMMANDS,
 };
-use super::chat_handlers::{
-    finish_bot_message, handle_agent_event, ChatMsg, LiveBlock, Segment,
-};
-use super::chat_render::{rainbow_text, render_status_line, render_tool_block};
+use super::chat_handlers::{finish_bot_message, handle_agent_event, ChatMsg, LiveBlock, Segment};
+use super::chat_render::{render_tool_block, thinking_indicator};
 use super::file_picker::index_files;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -54,6 +52,7 @@ pub struct ChatScreen {
     pub history: Vec<String>,
     pub history_idx: isize,
     pub textarea_height: u16,
+    pub textarea_scroll: usize,
 
     pub viewport_offset: usize,
     pub viewport_lines: Vec<String>,
@@ -81,7 +80,12 @@ pub struct ChatScreen {
 }
 
 impl ChatScreen {
-    pub fn new(cwd: String, templates: Vec<Template>, show_thinking: bool, tools_expanded: bool) -> Self {
+    pub fn new(
+        cwd: String,
+        templates: Vec<Template>,
+        show_thinking: bool,
+        tools_expanded: bool,
+    ) -> Self {
         let tmpl_items: Vec<(Template, String)> = templates
             .iter()
             .map(|t| (t.clone(), t.name.clone()))
@@ -111,7 +115,8 @@ impl ChatScreen {
             cursor: 0,
             history: Vec::new(),
             history_idx: -1,
-            textarea_height: 3,
+            textarea_height: 1,
+            textarea_scroll: 0,
 
             viewport_offset: 0,
             viewport_lines: Vec::new(),
@@ -142,7 +147,7 @@ impl ChatScreen {
     pub fn set_size(&mut self, w: u16, h: u16) {
         self.width = w;
         self.height = h;
-        self.renderer = StreamRenderer::new((w as usize).saturating_sub(2));
+        self.renderer = StreamRenderer::new((w as usize).saturating_sub(5));
         for msg in &mut self.messages {
             msg.rendered.clear();
         }
@@ -180,7 +185,11 @@ impl ChatScreen {
         self.render_messages();
     }
 
-    pub fn load_messages(&mut self, msgs: &[Message], children: &std::collections::HashMap<String, Vec<Message>>) {
+    pub fn load_messages(
+        &mut self,
+        msgs: &[Message],
+        children: &std::collections::HashMap<String, Vec<Message>>,
+    ) {
         let mut pending_tools: Vec<(String, String, String)> = Vec::new();
 
         for msg in msgs {
@@ -190,18 +199,27 @@ impl ChatScreen {
                     self.history.push(msg.content.clone());
                 }
                 crate::message::Role::Assistant => {
-                    let last_was_assistant = self.messages.last().map(|m| m.role == "assistant").unwrap_or(false);
+                    let last_was_assistant = self
+                        .messages
+                        .last()
+                        .map(|m| m.role == "assistant")
+                        .unwrap_or(false);
 
                     if last_was_assistant {
                         let last = self.messages.last_mut().unwrap();
                         if !msg.reasoning_content.is_empty() {
-                            last.segments.push(Segment::thinking(&msg.reasoning_content));
+                            last.segments
+                                .push(Segment::thinking(&msg.reasoning_content));
                         }
                         if !msg.content.is_empty() {
                             last.segments.push(Segment::prose(&msg.content));
                         }
                         for tc in &msg.tool_calls {
-                            pending_tools.push((tc.id.clone(), tc.function.name.clone(), tc.function.arguments.clone()));
+                            pending_tools.push((
+                                tc.id.clone(),
+                                tc.function.name.clone(),
+                                tc.function.arguments.clone(),
+                            ));
                         }
                     } else {
                         let mut segments = Vec::new();
@@ -212,7 +230,11 @@ impl ChatScreen {
                             segments.push(Segment::prose(&msg.content));
                         }
                         for tc in &msg.tool_calls {
-                            pending_tools.push((tc.id.clone(), tc.function.name.clone(), tc.function.arguments.clone()));
+                            pending_tools.push((
+                                tc.id.clone(),
+                                tc.function.name.clone(),
+                                tc.function.arguments.clone(),
+                            ));
                         }
                         self.messages.push(ChatMsg::assistant(segments));
                     }
@@ -240,19 +262,16 @@ impl ChatScreen {
                                 if let Some(child_msgs) = children.get(&id) {
                                     let subagent = parse_subagent_from_args(&args);
                                     for child_msg in child_msgs {
-                                        match child_msg.role {
-                                            crate::message::Role::Tool => {
-                                                last.segments.push(Segment::tool(
-                                                    &child_msg.name,
-                                                    "",
-                                                    &child_msg.content,
-                                                    "",
-                                                    &child_msg.tool_duration,
-                                                    &self.cwd,
-                                                    &subagent,
-                                                ));
-                                            }
-                                            _ => {}
+                                        if child_msg.role == crate::message::Role::Tool {
+                                            last.segments.push(Segment::tool(
+                                                &child_msg.name,
+                                                "",
+                                                &child_msg.content,
+                                                "",
+                                                &child_msg.tool_duration,
+                                                &self.cwd,
+                                                &subagent,
+                                            ));
                                         }
                                     }
                                 }
@@ -271,21 +290,21 @@ impl ChatScreen {
         if area.width != self.width || area.height != self.height {
             self.set_size(area.width, area.height);
         }
-        self.render_messages_area(f, area);
+        self.update_textarea_layout();
+        let bottom_h = self.bottom_bar_height().min(area.height);
+
+        let msg_area = Rect::new(
+            area.x + 2,
+            area.y,
+            area.width.saturating_sub(3),
+            area.height.saturating_sub(bottom_h),
+        );
+        self.render_messages_area(f, msg_area);
         self.render_bottom_bar(f, area);
     }
 
-    fn render_messages_area(&mut self, f: &mut Frame, area: Rect) {
-        let bottom_height = self.bottom_bar_height();
-        let msg_area = Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            area.height.saturating_sub(bottom_height),
-        );
-
+    fn render_messages_area(&mut self, f: &mut Frame, msg_area: Rect) {
         let mut all_lines: Vec<Line> = Vec::new();
-        all_lines.push(Line::from(""));
         all_lines.push(Line::from(""));
 
         for msg in &self.messages {
@@ -297,10 +316,15 @@ impl ChatScreen {
 
             let text = crate::render::block::ansi_to_text(&rendered);
 
+            if msg.role == "user" {
+                all_lines.push(Line::from(""));
+            }
             for line in text.lines {
                 all_lines.push(line);
             }
-            all_lines.push(Line::from(""));
+            if msg.role == "user" {
+                all_lines.push(Line::from(""));
+            }
         }
 
         if !self.live_blocks.is_empty() {
@@ -328,27 +352,26 @@ impl ChatScreen {
         }
 
         let text = Text::from(all_lines);
-        let paragraph = Paragraph::new(text)
-            .wrap(Wrap { trim: true })
-            .scroll((self.viewport_offset as u16, 0));
+        let paragraph = Paragraph::new(text).scroll((self.viewport_offset as u16, 0));
         f.render_widget(paragraph, msg_area);
     }
 
     fn render_message_ansi(&self, msg: &ChatMsg) -> String {
         match msg.role.as_str() {
             "user" => {
-                let accent = "\x1b[38;2;255;199;153m";
+                let user_accent = "\x1b[38;2;200;200;200m";
+                let text_fg = "\x1b[38;2;225;225;225m";
                 let reset = "\x1b[0m";
-                let w = (self.width as usize).saturating_sub(4).max(20);
+                let w = (self.width as usize).saturating_sub(5).max(20);
                 let content = crate::render::block::wordwrap(msg.content.trim(), w, "");
-                let top = format!("{accent}╭{}╮{reset}", "─".repeat(w + 2));
-                let mut lines = vec![top];
-                for line in content.lines() {
-                    let padded = format!("{accent}│{reset} {}{} {accent}│{reset}", line, " ".repeat(w.saturating_sub(unicode_width::UnicodeWidthStr::width(line))));
-                    lines.push(padded);
+                let mut lines = Vec::new();
+                for (i, line) in content.lines().enumerate() {
+                    if i == 0 {
+                        lines.push(format!("{user_accent}❯{reset} {text_fg}{line}{reset}"));
+                    } else {
+                        lines.push(format!("  {text_fg}{line}{reset}"));
+                    }
                 }
-                let bottom = format!("{accent}╰{}╯{reset}", "─".repeat(w + 2));
-                lines.push(bottom);
                 lines.join("\n")
             }
             "assistant" => self.render_assistant_turn(msg),
@@ -359,10 +382,9 @@ impl ChatScreen {
 
     fn render_assistant_turn(&self, msg: &ChatMsg) -> String {
         let mut parts = Vec::new();
-        let prefix = "◆ ";
-        let muted = "\x1b[38;2;106;106;106m";
+        let diamond = "\x1b[38;2;187;154;247m◆\x1b[0m ";
+        let bar = "\x1b[38;2;187;154;247m";
         let reset = "\x1b[0m";
-        let mut first = true;
 
         for seg in &msg.segments {
             let content = match seg.kind.as_str() {
@@ -370,102 +392,83 @@ impl ChatScreen {
                     if self.show_thinking {
                         let rendered = self.renderer.render(&seg.content);
                         let mut out = String::new();
-                        if first {
-                            out.push_str(&format!("{}{}{} {}", muted, "│", reset, prefix));
-                            out.push_str(&rendered.lines().collect::<Vec<_>>().join(&format!("\n{muted}│{reset} ")));
-                        } else {
-                            out.push_str(&format!("{muted}│{reset} "));
-                            out.push_str(&rendered.lines().collect::<Vec<_>>().join(&format!("\n{muted}│{reset} ")));
-                        }
+                        out.push_str(&format!("{bar}┃{reset} {diamond}Thinking…\n"));
+                        out.push_str(&format!("{bar}┃{reset} "));
+                        out.push_str(
+                            &rendered
+                                .lines()
+                                .collect::<Vec<_>>()
+                                .join(&format!("\n{bar}┃{reset} ")),
+                        );
                         out
                     } else {
                         continue;
                     }
                 }
-                "prose" => {
-                    let rendered = self.renderer.render(&seg.content);
-                    if first {
-                        format!("{} {}", prefix, rendered)
-                    } else {
-                        rendered
-                    }
-                }
-                "tool" => {
-                    render_tool_block(
-                        &seg.tool_name,
-                        &seg.tool_args,
-                        &seg.tool_result,
-                        &seg.tool_error,
-                        &seg.tool_duration,
-                        &self.cwd,
-                        &seg.tool_subagent,
-                        !self.tools_expanded,
-                        self.width as usize,
-                        0,
-                    )
-                }
+                "prose" => self.renderer.render(&seg.content),
+                "tool" => render_tool_block(
+                    &seg.tool_name,
+                    &seg.tool_args,
+                    &seg.tool_result,
+                    &seg.tool_error,
+                    &seg.tool_duration,
+                    &self.cwd,
+                    &seg.tool_subagent,
+                    !self.tools_expanded,
+                    (self.width as usize).saturating_sub(3),
+                    0,
+                ),
                 _ => continue,
             };
             if !content.is_empty() {
                 parts.push(content);
             }
-            first = false;
         }
         parts.join("\n\n")
     }
 
     fn render_live_turn(&self) -> String {
         let mut parts = Vec::new();
-        let prefix = "◆ ";
-        let muted = "\x1b[38;2;106;106;106m";
+        let diamond = "\x1b[38;2;187;154;247m◆\x1b[0m ";
+        let bar = "\x1b[38;2;187;154;247m";
         let reset = "\x1b[0m";
-        let mut first = true;
 
         for lb in &self.live_blocks {
             let content = match lb.kind.as_str() {
-                "prose" => {
-                    let rendered = self.renderer.render(&lb.raw);
-                    if first {
-                        format!("{} {}", prefix, rendered)
-                    } else {
-                        rendered
-                    }
-                }
+                "prose" => self.renderer.render(&lb.raw),
                 "thinking" => {
                     if !self.show_thinking {
                         continue;
                     }
                     let rendered = self.renderer.render(&lb.raw);
                     let mut out = String::new();
-                    if first {
-                        out.push_str(&format!("{}{}{} {}", muted, "│", reset, prefix));
-                        out.push_str(&rendered.lines().collect::<Vec<_>>().join(&format!("\n{muted}│{reset} ")));
-                    } else {
-                        out.push_str(&format!("{muted}│{reset} "));
-                        out.push_str(&rendered.lines().collect::<Vec<_>>().join(&format!("\n{muted}│{reset} ")));
-                    }
+                    out.push_str(&format!("{bar}┃{reset} {diamond}Thinking…\n"));
+                    out.push_str(&format!("{bar}┃{reset} "));
+                    out.push_str(
+                        &rendered
+                            .lines()
+                            .collect::<Vec<_>>()
+                            .join(&format!("\n{bar}┃{reset} ")),
+                    );
                     out
                 }
-                "tool" => {
-                    render_tool_block(
-                        &lb.tool_name,
-                        &lb.tool_args,
-                        &lb.tool_result,
-                        &lb.tool_error,
-                        &lb.tool_duration,
-                        &self.cwd,
-                        &lb.tool_subagent,
-                        !self.tools_expanded,
-                        self.width as usize,
-                        0,
-                    )
-                }
+                "tool" => render_tool_block(
+                    &lb.tool_name,
+                    &lb.tool_args,
+                    &lb.tool_result,
+                    &lb.tool_error,
+                    &lb.tool_duration,
+                    &self.cwd,
+                    &lb.tool_subagent,
+                    !self.tools_expanded,
+                    (self.width as usize).saturating_sub(3),
+                    0,
+                ),
                 _ => continue,
             };
             if !content.is_empty() {
                 parts.push(content);
             }
-            first = false;
         }
         parts.join("\n\n")
     }
@@ -489,7 +492,7 @@ impl ChatScreen {
 
     fn bottom_bar_height(&self) -> u16 {
         if self.waiting || self.compacting {
-            let mut h = 2u16;
+            let mut h = 1u16;
             if self.active_modal == Modal::Command {
                 h += (COMMANDS.len() + 3) as u16;
             }
@@ -498,7 +501,7 @@ impl ChatScreen {
             }
             return h;
         }
-        let mut h = self.textarea_height + 3;
+        let mut h = self.textarea_height + 2;
         if self.active_modal == Modal::Template {
             h += 8;
         }
@@ -515,7 +518,7 @@ impl ChatScreen {
     }
 
     fn render_bottom_bar(&self, f: &mut Frame, area: Rect) {
-        let bottom_h = self.bottom_bar_height();
+        let bottom_h = self.bottom_bar_height().min(area.height);
         let bottom_y = area.height.saturating_sub(bottom_h);
         let bottom_area = Rect::new(area.x, bottom_y, area.width, bottom_h);
 
@@ -523,68 +526,103 @@ impl ChatScreen {
 
         if self.active_modal == Modal::Template {
             let h = 8u16;
-            let modal_area = Rect::new(bottom_area.x, bottom_area.y, bottom_area.width.min(60), h);
-            render_template_dropdown(f, modal_area, &self.template_dropdown, "");
+            let top = bottom_area.y + y_offset;
+            if let Some(h2) = fit_height(area, top, h) {
+                let modal_area = Rect::new(bottom_area.x, top, bottom_area.width.min(60), h2);
+                render_template_dropdown(f, modal_area, &self.template_dropdown, "");
+            }
             y_offset += h;
         }
         if self.active_modal == Modal::File {
             let h = 11u16;
-            let modal_area = Rect::new(bottom_area.x, bottom_area.y + y_offset, bottom_area.width.min(60), h);
-            render_file_dropdown(f, modal_area, &self.file_dropdown);
+            let top = bottom_area.y + y_offset;
+            if let Some(h2) = fit_height(area, top, h) {
+                let modal_area = Rect::new(bottom_area.x, top, bottom_area.width.min(60), h2);
+                render_file_dropdown(f, modal_area, &self.file_dropdown);
+            }
             y_offset += h;
         }
         if self.active_modal == Modal::Command {
             let h = (COMMANDS.len() + 3) as u16;
-            let modal_area = Rect::new(bottom_area.x, bottom_area.y + y_offset, bottom_area.width.min(40), h);
-            render_command_dropdown(f, modal_area, &self.command_dropdown);
+            let top = bottom_area.y + y_offset;
+            if let Some(h2) = fit_height(area, top, h) {
+                let modal_area = Rect::new(bottom_area.x, top, bottom_area.width.min(40), h2);
+                render_command_dropdown(f, modal_area, &self.command_dropdown);
+            }
             y_offset += h;
         }
 
         if self.waiting || self.compacting {
-            let label = if self.compacting { "Compacting…" } else { "Thinking…" };
-            let thinking_text = format!("{} ({:.0?})", rainbow_text(label, self.wait_ticks).lines[0].to_string(), self.wait_start.elapsed());
-            let thinking_area = Rect::new(bottom_area.x, bottom_area.y + y_offset, bottom_area.width, 1);
-            f.render_widget(
-                Paragraph::new(thinking_text).alignment(Alignment::Left),
-                thinking_area,
-            );
-            y_offset += 1;
+            let label = if self.compacting {
+                "Compacting…"
+            } else {
+                "Thinking…"
+            };
+            let indicator = thinking_indicator(self.wait_ticks, label, self.wait_start.elapsed());
+            let top = bottom_area.y + y_offset;
+            if fit_height(area, top, 1).is_some() {
+                let thinking_area = Rect::new(bottom_area.x, top, bottom_area.width, 1);
+                f.render_widget(
+                    Paragraph::new(indicator).alignment(Alignment::Left),
+                    thinking_area,
+                );
+            }
         } else {
-            let input = if self.textarea.is_empty() { "Send a message…" } else { &self.textarea };
-            let input_area = Rect::new(
-                bottom_area.x + 1,
-                bottom_area.y + y_offset,
-                bottom_area.width.saturating_sub(2),
-                self.textarea_height,
-            );
-            let input_widget = Paragraph::new(input.to_string())
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::from_u32(0x002D2D2D))),
-                )
-                .wrap(Wrap { trim: true });
-            f.render_widget(input_widget, input_area);
-            y_offset += self.textarea_height + 1;
-        }
+            let prompt_h = self.textarea_height + 2;
+            let top = bottom_area.y + y_offset;
+            let input = if self.textarea.is_empty() {
+                "Send a message…"
+            } else {
+                &self.textarea
+            };
+            let input_color = if self.textarea.is_empty() {
+                Color::from_u32(0x006C6C6C)
+            } else {
+                Color::from_u32(0x00E1E1E1)
+            };
 
-        let status_area = Rect::new(
-            bottom_area.x,
-            bottom_area.y + y_offset,
-            bottom_area.width,
-            1,
-        );
-        render_status_line(
-            f,
-            status_area,
-            &self.model_name,
-            self.total_tokens,
-            self.context_window,
-            self.cache_hit_tokens,
-            self.total_cost,
-            &self.session_name,
-            self.user_scrolled_up,
-        );
+            let branch_or_cwd = crate::tui::chat_render::git_branch(&self.cwd)
+                .unwrap_or_else(|| shorten_cwd_string(&self.cwd));
+            let info_text = format!(" {} · {} ", self.model_name, branch_or_cwd);
+            let border_color = Color::from_u32(0x00505058);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border_color))
+                .title_bottom(ratatui::text::Line::styled(
+                    info_text,
+                    Style::default().fg(Color::from_u32(0x006C6C6C)),
+                ))
+                .title_alignment(ratatui::layout::Alignment::Right);
+
+            if let Some(h2) = fit_height(area, top, prompt_h) {
+                let prompt_area = Rect::new(
+                    bottom_area.x + 1,
+                    top,
+                    bottom_area.width.saturating_sub(2),
+                    h2,
+                );
+                let content_area = block.inner(prompt_area);
+                f.render_widget(block, prompt_area);
+                if content_area.height > 0 && content_area.width > 0 {
+                    f.render_widget(
+                        Paragraph::new(input.to_string())
+                            .style(Style::default().fg(input_color))
+                            .wrap(Wrap { trim: true })
+                            .scroll((self.textarea_scroll as u16, 0)),
+                        content_area,
+                    );
+                    let (crow, ccol) =
+                        textarea_cursor_xy(&self.textarea, self.cursor, content_area.width);
+                    let display_row = crow.saturating_sub(self.textarea_scroll as u16);
+                    let cx = content_area.x + ccol.min(content_area.width);
+                    let cy =
+                        content_area.y + display_row.min(content_area.height.saturating_sub(1));
+                    f.set_cursor_position((cx, cy));
+                }
+            }
+        }
     }
 
     pub fn open_command_dropdown(&mut self) {
@@ -705,13 +743,11 @@ impl ChatScreen {
                 .push(m.id.clone());
         }
 
-        let roots: Vec<String> = children
-            .get("")
-            .cloned()
-            .unwrap_or_default();
+        let roots: Vec<String> = children.get("").cloned().unwrap_or_default();
 
         let mut items: Vec<(String, String, usize, bool, Vec<bool>, bool)> = Vec::new();
 
+        #[allow(clippy::too_many_arguments, clippy::type_complexity)]
         fn walk(
             turn_id: &str,
             depth: usize,
@@ -879,7 +915,23 @@ impl ChatScreen {
     pub fn clear_textarea(&mut self) {
         self.textarea.clear();
         self.cursor = 0;
+        self.textarea_scroll = 0;
         self.history_idx = -1;
+    }
+
+    pub fn update_textarea_layout(&mut self) {
+        let cw = self.width.saturating_sub(4);
+        let total = textarea_total_rows(&self.textarea, cw);
+        let max_h = (self.height / 3).max(3);
+        self.textarea_height = total.min(max_h).max(1);
+        let (crow, _) = textarea_cursor_xy(&self.textarea, self.cursor, cw);
+        let crow = crow as usize;
+        let visible = self.textarea_height as usize;
+        if crow < self.textarea_scroll {
+            self.textarea_scroll = crow;
+        } else if crow >= self.textarea_scroll + visible {
+            self.textarea_scroll = crow + 1 - visible;
+        }
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -930,5 +982,331 @@ fn parse_subagent_from_args(args: &str) -> String {
         v["subagent"].as_str().unwrap_or("").to_string()
     } else {
         String::new()
+    }
+}
+
+fn shorten_cwd_string(cwd: &str) -> String {
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = home.to_string_lossy();
+        if cwd.starts_with(&*home) {
+            return format!("~/{}", &cwd[home.len()..]);
+        }
+    }
+    cwd.to_string()
+}
+
+fn wrap_line(line: &str, max_w: usize) -> Vec<(usize, usize)> {
+    if max_w == 0 {
+        return vec![(0, 0)];
+    }
+    let mut rows: Vec<(usize, usize)> = Vec::new();
+    let mut line_start = 0usize;
+    let mut line_w = 0usize;
+    let mut content_end = 0usize;
+    let mut i = 0usize;
+    let mut iter = line.char_indices().peekable();
+    loop {
+        let gap_start = i;
+        while let Some(&(_, c)) = iter.peek() {
+            if c == ' ' || c == '\t' {
+                let (b, c) = iter.next().unwrap();
+                i = b + c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        let gap_w = unicode_width::UnicodeWidthStr::width(&line[gap_start..i]);
+
+        let word_start = i;
+        while let Some(&(_, c)) = iter.peek() {
+            if c != ' ' && c != '\t' {
+                let (b, c) = iter.next().unwrap();
+                i = b + c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        let word_end = i;
+        if word_start == word_end {
+            break;
+        }
+        let word_w = unicode_width::UnicodeWidthStr::width(&line[word_start..word_end]);
+
+        if line_w + gap_w + word_w <= max_w {
+            line_w += gap_w + word_w;
+            content_end = word_end;
+        } else if word_w <= max_w {
+            if content_end > line_start {
+                rows.push((line_start, content_end));
+            }
+            line_start = word_start;
+            line_w = word_w;
+            content_end = word_end;
+        } else {
+            if content_end > line_start {
+                rows.push((line_start, content_end));
+            }
+            let mut seg_start = word_start;
+            let mut w = 0usize;
+            for (b, c) in line[word_start..word_end].char_indices() {
+                let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                let abs_b = word_start + b;
+                if w + cw > max_w && w > 0 {
+                    rows.push((seg_start, abs_b));
+                    seg_start = abs_b;
+                    w = cw;
+                } else {
+                    w += cw;
+                }
+            }
+            rows.push((seg_start, word_end));
+            line_start = word_end;
+            line_w = 0;
+            content_end = word_end;
+        }
+    }
+    if i > content_end {
+        content_end = i;
+    }
+    if content_end > line_start {
+        rows.push((line_start, content_end));
+    }
+    if rows.is_empty() {
+        rows.push((0, 0));
+    }
+    rows
+}
+
+fn fit_height(area: Rect, top: u16, h: u16) -> Option<u16> {
+    let bottom = area.y.saturating_add(area.height);
+    if top >= bottom {
+        return None;
+    }
+    Some(h.min(bottom - top))
+}
+
+fn textarea_total_rows(text: &str, max_w: u16) -> u16 {
+    let max_w = (max_w as usize).max(1);
+    let mut total = 0u16;
+    for line in text.split('\n') {
+        total = total.saturating_add(wrap_line(line, max_w).len() as u16);
+    }
+    total.max(1)
+}
+
+fn textarea_cursor_xy(text: &str, cursor: usize, max_w: u16) -> (u16, u16) {
+    let max_w = (max_w as usize).max(1);
+    let mut row: u16 = 0;
+    let mut byte = 0usize;
+    for line in text.split('\n') {
+        let llen = line.len();
+        if cursor <= byte + llen {
+            let rel = cursor - byte;
+            let rows = wrap_line(line, max_w);
+            let mut idx = 0usize;
+            for (k, (s, _)) in rows.iter().enumerate() {
+                if *s <= rel {
+                    idx = k;
+                } else {
+                    break;
+                }
+            }
+            let (s, e) = rows[idx];
+            let col = unicode_width::UnicodeWidthStr::width(&line[s..rel.min(e)]);
+            return (row + idx as u16, col as u16);
+        }
+        row += wrap_line(line, max_w).len() as u16;
+        byte += llen + 1;
+    }
+    (row, 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn render_to(screen: &mut ChatScreen, w: u16, h: u16) {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| screen.render(f)).unwrap();
+    }
+
+    #[test]
+    fn bottom_bar_never_overflows_buffer() {
+        use std::panic;
+        let mut panics: Vec<String> = Vec::new();
+        for &h in &[
+            1u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 24, 30, 40, 50,
+            60, 67, 80, 100,
+        ] {
+            for &(waiting, modal) in &[
+                (false, Modal::None),
+                (true, Modal::None),
+                (false, Modal::Command),
+                (true, Modal::Command),
+                (false, Modal::Template),
+                (true, Modal::Template),
+                (false, Modal::File),
+                (true, Modal::File),
+                (false, Modal::Tree),
+            ] {
+                for &tall in &[false, true] {
+                    let mut s = ChatScreen::new(".".into(), vec![], true, true);
+                    s.set_size(116, h);
+                    for _ in 0..20 {
+                        s.add_message("user", &"word ".repeat(60));
+                        s.add_message("assistant", &"reply ".repeat(80));
+                    }
+                    s.active_modal = modal;
+                    if modal == Modal::Command {
+                        s.open_command_dropdown();
+                    }
+                    s.waiting = waiting;
+                    if tall {
+                        s.set_text(&"long input line ".repeat(60));
+                    }
+                    s.scroll_to_bottom();
+                    let res = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                        render_to(&mut s, 116, h);
+                    }));
+                    if res.is_err() {
+                        panics.push(format!(
+                            "h={} waiting={} modal={} tall={}",
+                            h,
+                            waiting,
+                            match modal {
+                                Modal::None => "None",
+                                Modal::Command => "Command",
+                                Modal::Template => "Template",
+                                Modal::File => "File",
+                                Modal::Tree => "Tree",
+                            },
+                            tall
+                        ));
+                    }
+                }
+            }
+        }
+        if !panics.is_empty() {
+            for p in &panics {
+                eprintln!("PANIC: {}", p);
+            }
+        }
+        assert!(panics.is_empty(), "reproduced {} panics", panics.len());
+    }
+
+    fn wrapped(line: &str, w: usize) -> Vec<String> {
+        wrap_line(line, w)
+            .iter()
+            .map(|(s, e)| line[*s..*e].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn wrap_matches_ratatui_long_sentence() {
+        let line =
+            "abcd efghij klmnopabcd efgh ijklmnopabcdefg hijkl mnopab c d e f g h i j k l m n o";
+        assert_eq!(
+            wrapped(line, 20),
+            vec![
+                "abcd efghij",
+                "klmnopabcd efgh",
+                "ijklmnopabcdefg",
+                "hijkl mnopab c d e f",
+                "g h i j k l m n o",
+            ]
+        );
+    }
+
+    #[test]
+    fn wrap_long_word_breaks_at_width() {
+        let line: String = "a".repeat(75);
+        let rows = wrapped(&line, 20);
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0].len(), 20);
+        assert_eq!(rows[1].len(), 20);
+        assert_eq!(rows[3].len(), 15);
+    }
+
+    #[test]
+    fn cursor_xy_single_line() {
+        assert_eq!(textarea_cursor_xy("hello", 0, 80), (0, 0));
+        assert_eq!(textarea_cursor_xy("hello", 2, 80), (0, 2));
+        assert_eq!(textarea_cursor_xy("hello", 5, 80), (0, 5));
+    }
+
+    #[test]
+    fn cursor_xy_multiline() {
+        assert_eq!(textarea_cursor_xy("ab\ncd", 5, 80), (1, 2));
+        assert_eq!(textarea_cursor_xy("ab\ncd", 3, 80), (1, 0));
+    }
+
+    #[test]
+    fn cursor_xy_wraps_at_word_boundary() {
+        // width 11: "hello world" fits; cursor at end is col 11
+        assert_eq!(textarea_cursor_xy("hello world", 11, 11), (0, 11));
+        // width 5: "world" wraps to row 1; cursor at end is row 1 col 5
+        assert_eq!(textarea_cursor_xy("hello world", 11, 5), (1, 5));
+    }
+
+    #[test]
+    fn cursor_xy_trailing_space() {
+        // trailing space at end of line: cursor must advance past it
+        assert_eq!(textarea_cursor_xy("hello ", 6, 80), (0, 6));
+        // cursor in the middle of a run of trailing spaces
+        assert_eq!(textarea_cursor_xy("hello   ", 7, 80), (0, 7));
+        // a line of only spaces
+        assert_eq!(textarea_cursor_xy("   ", 3, 80), (0, 3));
+    }
+
+    #[test]
+    fn total_rows_empty() {
+        assert_eq!(textarea_total_rows("", 80), 1);
+    }
+
+    #[test]
+    fn total_rows_single_line() {
+        assert_eq!(textarea_total_rows("hello", 80), 1);
+    }
+
+    #[test]
+    fn total_rows_newlines() {
+        assert_eq!(textarea_total_rows("a\nb\nc", 80), 3);
+    }
+
+    #[test]
+    fn total_rows_word_wrap() {
+        // 4 words of 5 chars + 3 spaces = 23 chars; width 11 wraps to 2 rows
+        assert_eq!(textarea_total_rows("hello world hello world", 11), 2);
+        // 5 words: “a b c d e” = 9 chars; width 3 -> 3 rows
+        assert_eq!(textarea_total_rows("a b c d e", 3), 3);
+    }
+
+    #[test]
+    fn total_rows_long_word() {
+        let line: String = "a".repeat(75);
+        assert_eq!(textarea_total_rows(&line, 20), 4);
+    }
+
+    #[test]
+    fn layout_grows_and_scrolls() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_size(80, 24);
+        s.update_textarea_layout();
+        assert_eq!(s.textarea_height, 1);
+        assert_eq!(s.textarea_scroll, 0);
+
+        // type enough to produce 5 wrapped rows (content width = 76)
+        let long: String = "word ".repeat(80);
+        s.set_text(&long);
+        s.update_textarea_layout();
+        assert!(s.textarea_height >= 1);
+        let max_h = 24 / 3;
+        assert!(s.textarea_height <= max_h);
+        // cursor at end should be visible
+        let (crow, _) = textarea_cursor_xy(&s.textarea, s.cursor, 76);
+        assert!((crow as usize) >= s.textarea_scroll);
+        assert!((crow as usize) < s.textarea_scroll + s.textarea_height as usize);
     }
 }

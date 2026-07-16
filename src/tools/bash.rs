@@ -34,10 +34,7 @@ pub fn tool() -> Tool {
         serde_json::json!({"type": "integer", "description": "Maximum lines to return from the end of output (default: 500)"}),
     );
     params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert(
-        "required".to_string(),
-        serde_json::json!(["command"]),
-    );
+    params.insert("required".to_string(), serde_json::json!(["command"]));
 
     define_tool(
         "bash",
@@ -122,7 +119,10 @@ async fn execute_bash(p: BashParams) -> Result<String, String> {
 
     match merged {
         Ok(bytes) => {
-            let status = child.wait().await.map_err(|e| format!("bash error: {}", e))?;
+            let status = child
+                .wait()
+                .await
+                .map_err(|e| format!("bash error: {}", e))?;
             let s = String::from_utf8_lossy(&bytes).to_string();
             let result_str = if !status.success() {
                 let trimmed = s.trim().to_string();

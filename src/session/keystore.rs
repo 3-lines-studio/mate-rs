@@ -21,7 +21,11 @@ impl KeyStore {
         self.data.get(key)
     }
 
-    pub fn set(&mut self, key: &str, value: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn set(
+        &mut self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.data.insert(key.to_string(), value.to_string());
         self.save()
     }

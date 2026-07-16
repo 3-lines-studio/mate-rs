@@ -59,11 +59,6 @@ impl Deps {
             }
             asession
         });
-        Ok(SessionManager::new(
-            self.store.clone(),
-            cache,
-            ks,
-            factory,
-        ))
+        Ok(SessionManager::new(self.store.clone(), cache, ks, factory))
     }
 }

@@ -1,11 +1,11 @@
+use crate::session::store::Store;
+use crate::session::Session;
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
     widgets::{Block, List, ListItem, Paragraph},
     Frame,
 };
-use crate::session::store::Store;
-use crate::session::Session;
 
 pub struct SessionListScreen {
     pub sessions: Vec<Session>,
@@ -21,10 +21,19 @@ impl SessionListScreen {
             loaded: false,
         }
     }
+}
 
+impl Default for SessionListScreen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SessionListScreen {
     pub fn load(&mut self, store: &mut Store) {
         self.sessions = store.list().unwrap_or_default();
-        self.sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        self.sessions
+            .sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         self.sessions.truncate(10);
         self.loaded = true;
     }
@@ -54,7 +63,7 @@ impl SessionListScreen {
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        let accent = Color::from_u32(0x00FFC799);
+        let accent = Color::from_u32(0x00BB9AF7);
 
         if area.height >= 16 {
             self.render_welcome(f, area, accent);
@@ -109,15 +118,14 @@ impl SessionListScreen {
 
         if !self.loaded {
             let item = ListItem::new("Loading sessions...")
-                .style(Style::default().fg(Color::from_u32(0x006A6A6A)));
+                .style(Style::default().fg(Color::from_u32(0x006C6C6C)));
             items.push(item);
         } else {
             let new_item = if self.selected == 0 {
-                ListItem::new("  New Session")
-                    .style(Style::default().fg(accent))
+                ListItem::new("  New Session").style(Style::default().fg(accent))
             } else {
                 ListItem::new("  New Session")
-                    .style(Style::default().fg(Color::from_u32(0x00D4D4D4)))
+                    .style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
             };
             items.push(new_item);
 
@@ -144,8 +152,7 @@ impl SessionListScreen {
                     items.push(ListItem::new(text).style(Style::default().fg(accent)));
                 } else {
                     items.push(
-                        ListItem::new(text)
-                            .style(Style::default().fg(Color::from_u32(0x00D4D4D4))),
+                        ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00C8C8C8))),
                     );
                 }
             }

@@ -69,8 +69,7 @@ fn execute_grep(mut p: GrepParams) -> Result<String, String> {
     let matcher = build_matcher(&p.pattern, p.regex)?;
 
     let path = Path::new(&p.path);
-    let meta =
-        std::fs::metadata(path).map_err(|e| format!("grep: {}", e))?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("grep: {}", e))?;
 
     if !meta.is_dir() {
         if is_binary_file(path) {
@@ -129,16 +128,28 @@ fn execute_grep(mut p: GrepParams) -> Result<String, String> {
     Ok(results.join("\n"))
 }
 
-fn collect_files(root: &Path, ig: &crate::tools::gitignore::GitignoreMatcher) -> Vec<std::path::PathBuf> {
+fn collect_files(
+    root: &Path,
+    ig: &crate::tools::gitignore::GitignoreMatcher,
+) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
-    fn walk(dir: &Path, root: &Path, ig: &crate::tools::gitignore::GitignoreMatcher, files: &mut Vec<std::path::PathBuf>) {
+    fn walk(
+        dir: &Path,
+        root: &Path,
+        ig: &crate::tools::gitignore::GitignoreMatcher,
+        files: &mut Vec<std::path::PathBuf>,
+    ) {
         let read_dir = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
             Err(_) => return,
         };
         for entry in read_dir.flatten() {
             let path = entry.path();
-            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
             if path.is_dir() {
                 let name = entry.file_name().to_string_lossy().to_lowercase();
                 if should_skip_dir(&name) {
@@ -160,10 +171,8 @@ fn collect_files(root: &Path, ig: &crate::tools::gitignore::GitignoreMatcher) ->
     files
 }
 
-fn build_matcher(
-    pattern: &str,
-    is_regex: bool,
-) -> Result<Box<dyn Fn(&str) -> bool>, String> {
+#[allow(clippy::type_complexity)]
+fn build_matcher(pattern: &str, is_regex: bool) -> Result<Box<dyn Fn(&str) -> bool>, String> {
     if is_regex {
         let re = Regex::new(pattern).map_err(|e| format!("invalid regex: {}", e))?;
         Ok(Box::new(move |line: &str| re.is_match(line)))
@@ -175,7 +184,7 @@ fn build_matcher(
 
 fn grep_file(
     path: &Path,
-    matcher: &Box<dyn Fn(&str) -> bool>,
+    matcher: &dyn Fn(&str) -> bool,
     max_results: i32,
 ) -> Result<String, String> {
     let f = match std::fs::File::open(path) {
@@ -208,12 +217,7 @@ fn grep_file(
         if matcher(&line) {
             let display = path.to_string_lossy();
             let display = display.strip_prefix("./").unwrap_or(&display);
-            results.push(format!(
-                "{}:{}: {}",
-                display,
-                line_num,
-                line
-            ));
+            results.push(format!("{}:{}: {}", display, line_num, line));
             if results.len() >= max_results as usize {
                 break;
             }
@@ -237,13 +241,7 @@ fn is_binary_file(path: &Path) -> bool {
 fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git"
-            | "node_modules"
-            | "vendor"
-            | ".idea"
-            | ".vscode"
-            | "__pycache__"
-            | ".pytest_cache"
+        ".git" | "node_modules" | "vendor" | ".idea" | ".vscode" | "__pycache__" | ".pytest_cache"
     )
 }
 
@@ -363,7 +361,9 @@ mod tests {
     #[test]
     fn test_grep_max_results() {
         let dir = tempfile::TempDir::new().unwrap();
-        let lines: Vec<String> = (0..10).map(|i| format!("line {}", (b'a' + i) as char)).collect();
+        let lines: Vec<String> = (0..10)
+            .map(|i| format!("line {}", (b'a' + i) as char))
+            .collect();
         std::fs::write(dir.path().join("a.go"), lines.join("\n")).unwrap();
 
         let result = execute_grep(GrepParams {

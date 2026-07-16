@@ -92,18 +92,19 @@ pub fn resolve_subagents(
 ) -> HashMap<String, agent::SubagentDef> {
     let mut defs = HashMap::new();
     for sc in &cfg.subagents {
-        let (client, model_name) = match resolve_client(&sc.model, &cfg.models, &cfg.providers, verbose) {
-            Ok(c) => c,
-            Err(e) => {
-                log::warn!(
-                    "subagent model not found subagent={} model={}: {}",
-                    sc.id,
-                    sc.model,
-                    e
-                );
-                continue;
-            }
-        };
+        let (client, model_name) =
+            match resolve_client(&sc.model, &cfg.models, &cfg.providers, verbose) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!(
+                        "subagent model not found subagent={} model={}: {}",
+                        sc.id,
+                        sc.model,
+                        e
+                    );
+                    continue;
+                }
+            };
 
         let mut reg = Registry::new();
         for name in &sc.tools {

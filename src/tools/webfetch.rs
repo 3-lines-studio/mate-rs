@@ -111,10 +111,7 @@ async fn check_public_host(host: &str) -> Result<(), String> {
             if Instant::now() < entry.expires {
                 for ip in &entry.addrs {
                     if is_private_addr(ip) {
-                        return Err(format!(
-                            "blocked: {} resolves to private IP {}",
-                            host, ip
-                        ));
+                        return Err(format!("blocked: {} resolves to private IP {}", host, ip));
                     }
                 }
                 return Ok(());
@@ -135,10 +132,7 @@ async fn check_public_host(host: &str) -> Result<(), String> {
 
     for ip in &addrs {
         if is_private_addr(ip) {
-            return Err(format!(
-                "blocked: {} resolves to private IP {}",
-                host, ip
-            ));
+            return Err(format!("blocked: {} resolves to private IP {}", host, ip));
         }
     }
 
@@ -157,10 +151,7 @@ async fn check_public_host(host: &str) -> Result<(), String> {
 fn is_private_addr(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
         }
         IpAddr::V6(v6) => {
             if v6.is_loopback() || v6.is_unspecified() {
@@ -328,12 +319,7 @@ fn remove_blocks_for_detection(s: &str, tag: &str) -> String {
     let mut s = s.to_string();
     let mut lower = lower;
 
-    loop {
-        let start = match lower.find(&open_prefix) {
-            Some(pos) => pos,
-            None => break,
-        };
-
+    while let Some(start) = lower.find(&open_prefix) {
         let end = match lower[start..].find(&close_tag) {
             Some(pos) => pos + close_tag.len(),
             None => break,
@@ -388,33 +374,27 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url_default_max_size() {
         let mut max_size = 0;
-        assert!(
-            validate_and_clamp_url("https://x.com", &mut max_size)
-                .await
-                .is_ok()
-        );
+        assert!(validate_and_clamp_url("https://x.com", &mut max_size)
+            .await
+            .is_ok());
         assert_eq!(max_size, 100000);
     }
 
     #[tokio::test]
     async fn test_validate_url_negative_max_size() {
         let mut max_size = -5;
-        assert!(
-            validate_and_clamp_url("https://x.com", &mut max_size)
-                .await
-                .is_ok()
-        );
+        assert!(validate_and_clamp_url("https://x.com", &mut max_size)
+            .await
+            .is_ok());
         assert_eq!(max_size, 100000);
     }
 
     #[tokio::test]
     async fn test_validate_url_clamped() {
         let mut max_size = 999999;
-        assert!(
-            validate_and_clamp_url("https://x.com", &mut max_size)
-                .await
-                .is_ok()
-        );
+        assert!(validate_and_clamp_url("https://x.com", &mut max_size)
+            .await
+            .is_ok());
         assert_eq!(max_size, 500000);
     }
 
@@ -489,7 +469,10 @@ mod tests {
 
     #[test]
     fn test_remove_blocks() {
-        assert_eq!(remove_blocks_for_detection("a<script>code</script>b", "script"), "ab");
+        assert_eq!(
+            remove_blocks_for_detection("a<script>code</script>b", "script"),
+            "ab"
+        );
     }
 
     #[test]
@@ -592,12 +575,11 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url_blocks_link_local() {
         let mut max_size = 100;
-        assert!(validate_and_clamp_url(
-            "http://169.254.169.254/latest/meta-data/",
-            &mut max_size
-        )
-        .await
-        .is_err());
+        assert!(
+            validate_and_clamp_url("http://169.254.169.254/latest/meta-data/", &mut max_size)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -611,8 +593,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/redirect"))
             .respond_with(
-                ResponseTemplate::new(302)
-                    .insert_header("Location", "http://10.0.0.1/blocked"),
+                ResponseTemplate::new(302).insert_header("Location", "http://10.0.0.1/blocked"),
             )
             .mount(&mock_server)
             .await;
@@ -632,11 +613,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_host_from_url() {
-        assert_eq!(host_from_url("https://example.com/path"), Some("example.com".to_string()));
+        assert_eq!(
+            host_from_url("https://example.com/path"),
+            Some("example.com".to_string())
+        );
         assert_eq!(
             host_from_url("http://example.com:8080/path"),
             Some("example.com".to_string())
         );
-        assert_eq!(host_from_url("https://[::1]:8080/path"), Some("::1".to_string()));
+        assert_eq!(
+            host_from_url("https://[::1]:8080/path"),
+            Some("::1".to_string())
+        );
     }
 }

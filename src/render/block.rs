@@ -1,8 +1,8 @@
-use unicode_width::UnicodeWidthStr;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
 };
+use unicode_width::UnicodeWidthStr;
 
 use super::theme::VESPER;
 
@@ -27,10 +27,7 @@ fn is_boundary(text: &str, i: isize) -> bool {
     if i < 0 || i as usize >= text.len() {
         return true;
     }
-    match text.as_bytes()[i as usize] {
-        b' ' | b'\t' | b'\n' => true,
-        _ => false,
-    }
+    matches!(text.as_bytes()[i as usize], b' ' | b'\t' | b'\n')
 }
 
 pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<InlineMatch> {
@@ -43,7 +40,9 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
         if let Some(idx) = text[i + 1..].find('`') {
             let end = i + idx + 2;
             let inner = &text[i..end];
-            if check_boundaries && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize)) {
+            if check_boundaries
+                && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
+            {
                 return None;
             }
             return Some(InlineMatch {
@@ -58,7 +57,9 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
         if let Some(idx) = text[i + 3..].find("***") {
             let end = i + idx + 6;
             let inner = &text[i + 3..i + 3 + idx];
-            if check_boundaries && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize)) {
+            if check_boundaries
+                && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
+            {
                 return None;
             }
             return Some(InlineMatch {
@@ -73,7 +74,9 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
         if let Some(idx) = text[i + 2..].find("**") {
             let end = i + idx + 4;
             let inner = &text[i + 2..i + 2 + idx];
-            if check_boundaries && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize)) {
+            if check_boundaries
+                && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
+            {
                 return None;
             }
             return Some(InlineMatch {
@@ -88,7 +91,9 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
         if let Some(idx) = text[i + 1..].find('*') {
             let end = i + idx + 2;
             let inner = &text[i + 1..i + 1 + idx];
-            if check_boundaries && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize)) {
+            if check_boundaries
+                && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
+            {
                 return None;
             }
             return Some(InlineMatch {
@@ -103,7 +108,9 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
         if let Some(idx) = text[i + 2..].find("~~") {
             let end = i + idx + 4;
             let inner = &text[i + 2..i + 2 + idx];
-            if check_boundaries && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize)) {
+            if check_boundaries
+                && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
+            {
                 return None;
             }
             return Some(InlineMatch {
@@ -121,7 +128,9 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
                 if let Some(close_p) = text[close_paren_pos + 1..].find(')') {
                     let end = close_paren_pos + close_p + 2;
                     let inner = &text[i + 1..i + 1 + close_b];
-                    if check_boundaries && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize)) {
+                    if check_boundaries
+                        && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
+                    {
                         return None;
                     }
                     return Some(InlineMatch {
@@ -137,7 +146,14 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
     None
 }
 
-fn ansi_style(text: &str, fg: Option<&str>, bold: bool, italic: bool, strikethrough: bool, underline: bool) -> String {
+fn ansi_style(
+    text: &str,
+    fg: Option<&str>,
+    bold: bool,
+    italic: bool,
+    strikethrough: bool,
+    underline: bool,
+) -> String {
     let mut codes: Vec<String> = Vec::new();
     if bold {
         codes.push("1".to_string());
@@ -239,11 +255,21 @@ pub fn task_todo_style() -> (Option<String>, bool, bool) {
 }
 
 pub fn table_border_style() -> String {
-    format!("\x1b[38;2;{};{};{}m", hex_to_rgb(VESPER.border).0, hex_to_rgb(VESPER.border).1, hex_to_rgb(VESPER.border).2)
+    format!(
+        "\x1b[38;2;{};{};{}m",
+        hex_to_rgb(VESPER.border).0,
+        hex_to_rgb(VESPER.border).1,
+        hex_to_rgb(VESPER.border).2
+    )
 }
 
 pub fn table_header_style() -> String {
-    format!("\x1b[1;38;2;{};{};{}m", hex_to_rgb(VESPER.fg).0, hex_to_rgb(VESPER.fg).1, hex_to_rgb(VESPER.fg).2)
+    format!(
+        "\x1b[1;38;2;{};{};{}m",
+        hex_to_rgb(VESPER.fg).0,
+        hex_to_rgb(VESPER.fg).1,
+        hex_to_rgb(VESPER.fg).2
+    )
 }
 
 pub fn reset_ansi() -> &'static str {
@@ -334,16 +360,27 @@ pub fn ansi_to_text(s: &str) -> Text<'static> {
     let mut spans: Vec<Span> = Vec::new();
     let mut current = String::new();
     let mut fg: Option<Color> = None;
+    let mut bg: Option<Color> = None;
     let mut bold = false;
     let mut italic = false;
     let mut underline = false;
     let mut strikethrough = false;
 
-    let flush = |current: &mut String, spans: &mut Vec<Span>, fg: Option<Color>, bold: bool, italic: bool, underline: bool, strikethrough: bool| {
+    let flush = |current: &mut String,
+                 spans: &mut Vec<Span>,
+                 fg: Option<Color>,
+                 bg: Option<Color>,
+                 bold: bool,
+                 italic: bool,
+                 underline: bool,
+                 strikethrough: bool| {
         if !current.is_empty() {
             let mut style = Style::default();
             if let Some(c) = fg {
                 style = style.fg(c);
+            }
+            if let Some(c) = bg {
+                style = style.bg(c);
             }
             if bold {
                 style = style.add_modifier(Modifier::BOLD);
@@ -365,7 +402,16 @@ pub fn ansi_to_text(s: &str) -> Text<'static> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            flush(&mut current, &mut spans, fg, bold, italic, underline, strikethrough);
+            flush(
+                &mut current,
+                &mut spans,
+                fg,
+                bg,
+                bold,
+                italic,
+                underline,
+                strikethrough,
+            );
             i += 2;
             let mut code_str = String::new();
             while i < bytes.len() && bytes[i] != b'm' {
@@ -377,6 +423,7 @@ pub fn ansi_to_text(s: &str) -> Text<'static> {
             }
             if code_str == "0" {
                 fg = None;
+                bg = None;
                 bold = false;
                 italic = false;
                 underline = false;
@@ -392,13 +439,25 @@ pub fn ansi_to_text(s: &str) -> Text<'static> {
                         "9" => strikethrough = true,
                         "38" => {
                             if ci + 4 < codes.len() && codes[ci + 1] == "2" {
-                                let r: u8 = codes[ci + 2].parse().unwrap_or(255);
-                                let g: u8 = codes[ci + 3].parse().unwrap_or(255);
-                                let b: u8 = codes[ci + 4].parse().unwrap_or(255);
-                                fg = Some(Color::from_u32(((r as u32) << 16) | ((g as u32) << 8) | (b as u32)));
+                                let r: u8 = codes[ci + 2].parse().unwrap_or(0);
+                                let g: u8 = codes[ci + 3].parse().unwrap_or(0);
+                                let b: u8 = codes[ci + 4].parse().unwrap_or(0);
+                                fg = Some(Color::from_u32(
+                                    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32),
+                                ));
                                 ci += 5;
                                 continue;
                             }
+                        }
+                        "48" if ci + 4 < codes.len() && codes[ci + 1] == "2" => {
+                            let r: u8 = codes[ci + 2].parse().unwrap_or(0);
+                            let g: u8 = codes[ci + 3].parse().unwrap_or(0);
+                            let b: u8 = codes[ci + 4].parse().unwrap_or(0);
+                            bg = Some(Color::from_u32(
+                                ((r as u32) << 16) | ((g as u32) << 8) | (b as u32),
+                            ));
+                            ci += 5;
+                            continue;
                         }
                         _ => {}
                     }
@@ -408,7 +467,16 @@ pub fn ansi_to_text(s: &str) -> Text<'static> {
             continue;
         }
         if bytes[i] == b'\n' {
-            flush(&mut current, &mut spans, fg, bold, italic, underline, strikethrough);
+            flush(
+                &mut current,
+                &mut spans,
+                fg,
+                bg,
+                bold,
+                italic,
+                underline,
+                strikethrough,
+            );
             lines.push(Line::from(std::mem::take(&mut spans)));
             spans.clear();
             i += 1;
@@ -418,7 +486,16 @@ pub fn ansi_to_text(s: &str) -> Text<'static> {
         current.push(c);
         i += c.len_utf8();
     }
-    flush(&mut current, &mut spans, fg, bold, italic, underline, strikethrough);
+    flush(
+        &mut current,
+        &mut spans,
+        fg,
+        bg,
+        bold,
+        italic,
+        underline,
+        strikethrough,
+    );
     if !spans.is_empty() {
         lines.push(Line::from(spans));
     }

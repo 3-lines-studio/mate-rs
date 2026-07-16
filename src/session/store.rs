@@ -1,10 +1,10 @@
-use crate::session::types::{turn_label, Session, Turn, TurnMeta};
 #[cfg(test)]
 use crate::message::Message;
 #[cfg(test)]
 use crate::session::types::compute_turn_id;
+use crate::session::types::{turn_label, Session, Turn, TurnMeta};
 use chrono::Utc;
-use rand::Rng;
+use rand::RngExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -60,7 +60,10 @@ impl Store {
         self.read_meta(id)
     }
 
-    pub fn save_meta(&mut self, sess: &Session) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn save_meta(
+        &mut self,
+        sess: &Session,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut sess = sess.clone();
         sess.updated_at = Utc::now();
         self.save_meta_locked(&sess)
@@ -112,11 +115,9 @@ impl Store {
 
         let turn_path = self.turn_path(session_id, &turn.id);
         if turn_path.exists() {
-            return Err(format!(
-                "turn {} already exists in session {}",
-                turn.id, session_id
-            )
-            .into());
+            return Err(
+                format!("turn {} already exists in session {}", turn.id, session_id).into(),
+            );
         }
 
         let data = serde_json::to_string(turn)?;
@@ -182,7 +183,10 @@ impl Store {
         Ok(turns)
     }
 
-    fn save_meta_locked(&self, sess: &Session) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn save_meta_locked(
+        &self,
+        sess: &Session,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let dir = self.session_dir(&sess.id);
         std::fs::create_dir_all(&dir)?;
         let path = self.meta_path(&sess.id);
@@ -295,7 +299,7 @@ impl Store {
 }
 
 fn random_hash() -> String {
-    let bytes: [u8; 3] = rand::thread_rng().gen();
+    let bytes: [u8; 3] = rand::rng().random();
     hex::encode(bytes)
 }
 

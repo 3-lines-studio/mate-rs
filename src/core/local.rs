@@ -9,10 +9,7 @@ impl Interface for LocalInterface {
         "local"
     }
 
-    fn run(
-        &self,
-        mut deps: Deps,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn run(&self, mut deps: Deps) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let sess = deps.store.create()?;
         let mut asession = deps.new_session(sess);
 
@@ -51,10 +48,7 @@ impl Interface for LocalInterface {
                             stdout.flush()?;
                         }
                         "tool_call_start" => {
-                            println!(
-                                "\n[{}()]",
-                                ev.tool_call_name
-                            );
+                            println!("\n[{}()]", ev.tool_call_name);
                         }
                         "tool_result" => {
                             let lines: Vec<&str> = ev.tool_result.lines().collect();
@@ -68,10 +62,7 @@ impl Interface for LocalInterface {
                             }
                         }
                         "tool_error" => {
-                            println!(
-                                "[{} error: {}]",
-                                ev.tool_call_name, ev.tool_error
-                            );
+                            println!("[{} error: {}]", ev.tool_call_name, ev.tool_error);
                         }
                         "error" => {
                             println!("\nError: {}", ev.error);

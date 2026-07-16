@@ -296,7 +296,10 @@ mod tests {
         assert_eq!(round.reasoning_details[0].text, "thinking...");
         assert_eq!(round.reasoning_details[0].id, "r1");
         assert_eq!(round.reasoning_details[0].format, "anthropic-claude-v1");
-        assert_eq!(round.reasoning_details[1].detail_type, "reasoning.encrypted");
+        assert_eq!(
+            round.reasoning_details[1].detail_type,
+            "reasoning.encrypted"
+        );
         assert_eq!(round.reasoning_details[1].data, "blob");
         assert_eq!(round.reasoning_details[1].signature, "sig123");
     }

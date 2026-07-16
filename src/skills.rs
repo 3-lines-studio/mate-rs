@@ -136,7 +136,16 @@ impl Store {
     }
 }
 
-pub fn load_skill_dirs(cwd: &str, cfg_dir: &str) -> Result<Store, Box<dyn std::error::Error + Send + Sync>> {
+impl Default for Store {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn load_skill_dirs(
+    cwd: &str,
+    cfg_dir: &str,
+) -> Result<Store, Box<dyn std::error::Error + Send + Sync>> {
     let mut store = Store::new();
     for dir in &[
         format!("{}/skills", cwd),
@@ -144,7 +153,9 @@ pub fn load_skill_dirs(cwd: &str, cfg_dir: &str) -> Result<Store, Box<dyn std::e
         format!("{}/skills", cfg_dir),
     ] {
         if let Err(e) = store.load_dir(dir) {
-            if e.downcast_ref::<std::io::Error>().map_or(true, |ioe| ioe.kind() != std::io::ErrorKind::NotFound) {
+            if e.downcast_ref::<std::io::Error>()
+                .is_none_or(|ioe| ioe.kind() != std::io::ErrorKind::NotFound)
+            {
                 log::warn!("loading skills dir {}: {}", dir, e);
             }
         }
@@ -168,7 +179,7 @@ fn parse_skill_file(raw: &str, source: &str) -> Skill {
             let frontmatter = &rest[..idx];
             rest = &rest[idx + 5..];
 
-            let fm: Frontmatter = serde_yaml::from_str(frontmatter).unwrap_or_default();
+            let fm: Frontmatter = yaml_serde::from_str(frontmatter).unwrap_or_default();
             skill.name = fm.name;
             skill.description = fm.description;
             skill.tools = fm.tools;
@@ -311,11 +322,8 @@ mod tests {
     #[test]
     fn test_load_skill_dirs_nonexistent() {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = load_skill_dirs(
-            &dir.path().to_string_lossy(),
-            &dir.path().to_string_lossy(),
-        )
-        .unwrap();
+        let store =
+            load_skill_dirs(&dir.path().to_string_lossy(), &dir.path().to_string_lossy()).unwrap();
         assert_eq!(store.list(), "No skills available.");
     }
 }

@@ -190,10 +190,7 @@ pub struct Client {
 
 #[async_trait::async_trait]
 pub trait ChatClient: Send + Sync {
-    async fn chat(
-        &self,
-        req: ChatRequest,
-    ) -> Result<mpsc::Receiver<StreamEvent>, ProviderError>;
+    async fn chat(&self, req: ChatRequest) -> Result<mpsc::Receiver<StreamEvent>, ProviderError>;
     fn model(&self) -> &str;
     fn context_window(&self) -> i32;
     fn pricing(&self) -> (f64, f64, f64);
@@ -236,8 +233,7 @@ impl ChatClient for Client {
             req.max_tokens = self.profile.max_output_tokens;
         }
         if self.profile.open_router {
-            if !self.profile.reasoning_effort.is_empty() || self.profile.reasoning_max_tokens > 0
-            {
+            if !self.profile.reasoning_effort.is_empty() || self.profile.reasoning_max_tokens > 0 {
                 req.reasoning = Some(ReasoningConfig {
                     effort: self.profile.reasoning_effort.clone(),
                     max_tokens: self.profile.reasoning_max_tokens,
@@ -665,11 +661,12 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
                         if let Some(tc_list) = &delta.tool_calls {
                             for tc in tc_list {
                                 let idx = tc.index.unwrap_or(0);
-                                let entry = tool_calls.entry(idx).or_insert_with(|| StreamToolCall {
-                                    id: String::new(),
-                                    name: String::new(),
-                                    arguments: String::new(),
-                                });
+                                let entry =
+                                    tool_calls.entry(idx).or_insert_with(|| StreamToolCall {
+                                        id: String::new(),
+                                        name: String::new(),
+                                        arguments: String::new(),
+                                    });
 
                                 if let Some(ref id) = tc.id {
                                     if !id.is_empty() {
@@ -860,9 +857,11 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+                ),
+            )
             .mount(&mock_server)
             .await;
 
@@ -914,10 +913,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let rx = c.chat(req).await.unwrap();
 
         drop(rx);
     }
@@ -971,10 +967,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let rx = c.chat(req).await.unwrap();
         drop(rx);
     }
 
@@ -1027,9 +1020,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let result = c
-            .chat(req)
-            .await;
+        let result = c.chat(req).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().status_code, 500);
     }
@@ -1083,10 +1074,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let rx = c.chat(req).await.unwrap();
         drop(rx);
     }
 
@@ -1139,10 +1127,7 @@ mod tests {
             session_id: "session-123".to_string(),
         };
 
-        let rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let rx = c.chat(req).await.unwrap();
         drop(rx);
     }
 
@@ -1199,10 +1184,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got_text = false;
         while let Some(ev) = rx.recv().await {
@@ -1219,11 +1201,9 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string(
-                    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking...\"}}]}\n\n",
-                ),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking...\"}}]}\n\n",
+            ))
             .mount(&mock_server)
             .await;
 
@@ -1266,10 +1246,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got = false;
         while let Some(ev) = rx.recv().await {
@@ -1333,10 +1310,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got = false;
         while let Some(ev) = rx.recv().await {
@@ -1400,10 +1374,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut deltas: Vec<String> = Vec::new();
         while let Some(ev) = rx.recv().await {
@@ -1468,15 +1439,12 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got_tool_call = false;
         while let Some(ev) = rx.recv().await {
             if ev.event_type == "tool_call"
-                && ev.tool_call.as_ref().map_or(false, |tc| tc.name == "bash")
+                && ev.tool_call.as_ref().is_some_and(|tc| tc.name == "bash")
             {
                 got_tool_call = true;
             }
@@ -1490,10 +1458,9 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            ))
             .mount(&mock_server)
             .await;
 
@@ -1536,10 +1503,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got = false;
         while let Some(ev) = rx.recv().await {
@@ -1603,15 +1567,11 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got = false;
         while let Some(ev) = rx.recv().await {
-            if ev.event_type == "usage"
-                && ev.usage.as_ref().map_or(false, |u| u.prompt_tokens == 10)
+            if ev.event_type == "usage" && ev.usage.as_ref().is_some_and(|u| u.prompt_tokens == 10)
             {
                 got = true;
             }
@@ -1672,10 +1632,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         while let Some(ev) = rx.recv().await {
             if ev.event_type == "usage" {
@@ -1742,10 +1699,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         while let Some(ev) = rx.recv().await {
             if ev.event_type == "usage" {
@@ -1809,10 +1763,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         while let Some(ev) = rx.recv().await {
             if ev.event_type == "usage" {
@@ -1876,10 +1827,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut merged: Vec<ReasoningDetail> = Vec::new();
         let mut got_delta = false;
@@ -1950,10 +1898,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut merged = Vec::new();
         while let Some(ev) = rx.recv().await {
@@ -2021,10 +1966,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut merged = Vec::new();
         while let Some(ev) = rx.recv().await {
@@ -2086,10 +2028,7 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         while rx.recv().await.is_some() {}
     }
@@ -2100,11 +2039,9 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string(
-                    "data: {\"error\":{\"code\":500,\"message\":\"Provider disconnected\"}}\n\n",
-                ),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: {\"error\":{\"code\":500,\"message\":\"Provider disconnected\"}}\n\n",
+            ))
             .mount(&mock_server)
             .await;
 
@@ -2147,17 +2084,13 @@ mod tests {
             session_id: String::new(),
         };
 
-        let mut rx = c
-            .chat(req)
-            .await
-            .unwrap();
+        let mut rx = c.chat(req).await.unwrap();
 
         let mut got_error = false;
         while let Some(ev) = rx.recv().await {
-            if ev.error.is_some() {
+            if let Some(err) = ev.error {
                 got_error = true;
                 assert!(ev.event_type.is_empty());
-                let err = ev.error.unwrap();
                 assert!(err.body.contains("500"));
                 assert!(err.body.contains("Provider disconnected"));
             }

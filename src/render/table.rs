@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthStr;
 
-use super::block::{inline_format, match_inline, strip_ansi, visible_width, truncate};
+use super::block::{inline_format, match_inline, strip_ansi, truncate, visible_width};
 
 pub const TBL_NONE: i32 = 0;
 pub const TBL_HEADER: i32 = 1;
@@ -174,10 +174,7 @@ pub fn render_table(
 }
 
 fn build_divider(widths: &[usize], left: &str, cross: &str, right: &str) -> String {
-    let parts: Vec<String> = widths
-        .iter()
-        .map(|w| "─".repeat(w + 2))
-        .collect();
+    let parts: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
     let border_color = super::block::table_border_style();
     let reset = super::block::reset_ansi();
     format!(
@@ -204,7 +201,13 @@ fn write_row_lines(
     for li in 0..nlines {
         let line_cells: Vec<String> = cells
             .iter()
-            .map(|c| if li < c.len() { c[li].clone() } else { String::new() })
+            .map(|c| {
+                if li < c.len() {
+                    c[li].clone()
+                } else {
+                    String::new()
+                }
+            })
             .collect();
 
         let header_style = super::block::table_header_style();
@@ -307,11 +310,8 @@ pub fn wrap_cell_text(text: &str, width: usize) -> Vec<String> {
     for (seg, _seg_w) in &segments {
         let formatted = inline_format(seg);
         let seg_width = UnicodeWidthStr::width(strip_ansi(&formatted).as_str());
-        let is_atomic = !seg.is_empty()
-            && matches!(
-                seg.chars().next().unwrap(),
-                '`' | '*' | '~' | '['
-            );
+        let is_atomic =
+            !seg.is_empty() && matches!(seg.chars().next().unwrap(), '`' | '*' | '~' | '[');
 
         if is_atomic {
             if seg_width <= width {

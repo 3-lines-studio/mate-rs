@@ -60,10 +60,7 @@ struct SlackEvent {
     thread_ts: String,
 }
 
-async fn auth_test(
-    client: &reqwest::Client,
-    bot_token: &str,
-) -> Result<String, String> {
+async fn auth_test(client: &reqwest::Client, bot_token: &str) -> Result<String, String> {
     let resp: AuthTestResp = client
         .post(api_url("auth.test"))
         .header("Authorization", format!("Bearer {}", bot_token))
@@ -79,10 +76,7 @@ async fn auth_test(
     Ok(resp.user_id.unwrap_or_default())
 }
 
-async fn connections_open(
-    client: &reqwest::Client,
-    app_token: &str,
-) -> Result<String, String> {
+async fn connections_open(client: &reqwest::Client, app_token: &str) -> Result<String, String> {
     let resp: ConnectionsOpenResp = client
         .post(api_url("apps.connections.open"))
         .header("Authorization", format!("Bearer {}", app_token))
@@ -93,7 +87,9 @@ async fn connections_open(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok {
-        return Err(resp.error.unwrap_or_else(|| "connections.open failed".into()));
+        return Err(resp
+            .error
+            .unwrap_or_else(|| "connections.open failed".into()));
     }
     resp.url.ok_or_else(|| "no url in connections.open".into())
 }
@@ -282,7 +278,7 @@ impl BotInner {
                     "events_api" => {
                         if let Some(ref eid) = env.envelope_id {
                             let ack = serde_json::json!({"envelope_id": eid}).to_string();
-                            let _ = ws.send(Message::Text(ack)).await;
+                            let _ = ws.send(Message::Text(ack.into())).await;
                         }
                         if let Some(payload) = env.payload {
                             if let Some(event) = parse_event(&payload, &self.bot_user_id) {
@@ -447,10 +443,7 @@ fn parse_event(payload: &serde_json::Value, bot_user_id: &str) -> Option<SlackEv
 
     match event_type {
         "app_mention" => {
-            let text = event
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let text = event.get("text").and_then(|v| v.as_str()).unwrap_or("");
             let mention = format!("<@{}>", bot_user_id);
             let text = text.replace(&mention, "").trim().to_string();
             if text.is_empty() {
@@ -486,10 +479,7 @@ fn parse_event(payload: &serde_json::Value, bot_user_id: &str) -> Option<SlackEv
             if channel_type != "im" {
                 return None;
             }
-            let subtype = event
-                .get("subtype")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let subtype = event.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
             if !subtype.is_empty() {
                 return None;
             }
@@ -539,10 +529,11 @@ impl Interface for BotAdapter {
 
         let http = reqwest::Client::new();
 
-        let bot_user_id = match {
+        let auth = {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(auth_test(&http, &bot_token))
-        } {
+        };
+        let bot_user_id = match auth {
             Ok(id) => id,
             Err(e) => {
                 log::error!("slack auth test: {}", e);

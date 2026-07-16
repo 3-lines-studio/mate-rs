@@ -40,10 +40,7 @@ pub fn tool() -> Tool {
         }),
     );
     params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert(
-        "required".to_string(),
-        serde_json::json!(["path", "edits"]),
-    );
+    params.insert("required".to_string(), serde_json::json!(["path", "edits"]));
 
     define_tool(
         "edit_file",

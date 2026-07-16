@@ -10,9 +10,9 @@ pub fn format_tokens(n: i32) -> String {
 
 pub fn tool_color(name: &str) -> &'static str {
     match name {
-        "read_file" | "grep" | "glob" => "#99FFE4",
-        "write_file" | "edit_file" | "bash" => "#FFCB8B",
-        _ => "#FFC799",
+        "read_file" | "grep" | "glob" => "#73daca",
+        "write_file" | "edit_file" | "bash" => "#e0af68",
+        _ => "#bb9af7",
     }
 }
 

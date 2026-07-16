@@ -13,7 +13,11 @@ pub struct TurnMeta {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subagent: String,
-    #[serde(default, skip_serializing_if = "String::is_empty", rename = "toolCallId")]
+    #[serde(
+        default,
+        skip_serializing_if = "String::is_empty",
+        rename = "toolCallId"
+    )]
     pub tool_call_id: String,
 }
 
@@ -27,7 +31,11 @@ pub struct Turn {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subagent: String,
-    #[serde(default, skip_serializing_if = "String::is_empty", rename = "toolCallId")]
+    #[serde(
+        default,
+        skip_serializing_if = "String::is_empty",
+        rename = "toolCallId"
+    )]
     pub tool_call_id: String,
 }
 
@@ -64,7 +72,7 @@ pub fn compute_turn_id(parent_id: &str, messages: &[Message]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(parent_id.as_bytes());
     for msg in messages {
-        hasher.update(&[0u8]);
+        hasher.update([0u8]);
         let json = serde_json::to_string(msg).unwrap();
         hasher.update(json.as_bytes());
     }

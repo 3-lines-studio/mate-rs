@@ -1,10 +1,10 @@
+use crate::prompts::Template;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, BorderType, Borders, List, ListItem},
     Frame,
 };
-use crate::prompts::Template;
 
 pub const COMMANDS: &[(&str, &str)] = &[
     ("New Session", "new"),
@@ -51,6 +51,12 @@ impl<T: Clone> Dropdown<T> {
     }
 }
 
+impl<T: Clone> Default for Dropdown<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(String, String)>) {
     let items: Vec<ListItem> = dropdown
         .items
@@ -60,12 +66,12 @@ pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(S
             if i == dropdown.selected {
                 ListItem::new(format!(" {}", label)).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00FFC799))
-                        .fg(Color::from_u32(0x00171717)),
+                        .bg(Color::from_u32(0x00242424))
+                        .fg(Color::from_u32(0x00BB9AF7)),
                 )
             } else {
                 ListItem::new(format!(" {}", label))
-                    .style(Style::default().fg(Color::from_u32(0x00D4D4D4)))
+                    .style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
             }
         })
         .collect();
@@ -73,7 +79,8 @@ pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(S
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::from_u32(0x00FFC799)))
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
             .title("Commands"),
     );
     f.render_widget(list, area);
@@ -100,12 +107,11 @@ pub fn render_template_dropdown(
             if i == dropdown.selected {
                 ListItem::new(text).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00FFC799))
-                        .fg(Color::from_u32(0x00171717)),
+                        .bg(Color::from_u32(0x00242424))
+                        .fg(Color::from_u32(0x00BB9AF7)),
                 )
             } else {
-                ListItem::new(text)
-                    .style(Style::default().fg(Color::from_u32(0x00D4D4D4)))
+                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
             }
         })
         .collect();
@@ -119,7 +125,8 @@ pub fn render_template_dropdown(
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::from_u32(0x00FFC799)))
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
             .title(title.as_str()),
     );
     f.render_widget(list, area);
@@ -134,12 +141,12 @@ pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(Stri
             if i == dropdown.selected {
                 ListItem::new(format!(" {}", path)).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00FFC799))
-                        .fg(Color::from_u32(0x00171717)),
+                        .bg(Color::from_u32(0x00242424))
+                        .fg(Color::from_u32(0x00BB9AF7)),
                 )
             } else {
                 ListItem::new(format!(" {}", path))
-                    .style(Style::default().fg(Color::from_u32(0x00D4D4D4)))
+                    .style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
             }
         })
         .collect();
@@ -147,12 +154,14 @@ pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(Stri
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::from_u32(0x00FFC799)))
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
             .title("Files"),
     );
     f.render_widget(list, area);
 }
 
+#[allow(clippy::type_complexity)]
 pub fn render_tree_dropdown(
     f: &mut Frame,
     area: Rect,
@@ -185,14 +194,13 @@ pub fn render_tree_dropdown(
             if i == dropdown.selected {
                 ListItem::new(text).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00FFCB8B))
-                        .fg(Color::from_u32(0x00171717)),
+                        .bg(Color::from_u32(0x00242424))
+                        .fg(Color::from_u32(0x00E0AF68)),
                 )
             } else if *is_current {
-                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00FFCB8B)))
+                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00E0AF68)))
             } else {
-                ListItem::new(text)
-                    .style(Style::default().fg(Color::from_u32(0x00D4D4D4)))
+                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
             }
         })
         .collect();
@@ -200,7 +208,8 @@ pub fn render_tree_dropdown(
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::from_u32(0x00FFCB8B)))
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
             .title("Turn Tree"),
     );
     f.render_widget(list, area);

@@ -46,14 +46,13 @@ pub fn tool() -> Tool {
             if p.limit <= 0 {
                 p.limit = DEFAULT_READ_LIMIT;
             }
-            read_file_lines(&p).map(|(content, _)| content).map_err(|e| e)
+            read_file_lines(&p).map(|(content, _)| content)
         },
     )
 }
 
 fn read_file_lines(p: &ReadFileParams) -> Result<(String, i32), String> {
-    let f =
-        std::fs::File::open(&p.path).map_err(|e| format!("read file {}: {}", p.path, e))?;
+    let f = std::fs::File::open(&p.path).map_err(|e| format!("read file {}: {}", p.path, e))?;
     let reader = std::io::BufReader::with_capacity(1024 * 1024, f);
 
     let mut lines: Vec<String> = Vec::new();

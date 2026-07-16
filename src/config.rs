@@ -278,10 +278,24 @@ fn config_path(dir: &str) -> PathBuf {
     p
 }
 
-pub fn save_tui(dir: &str, tools_expanded: bool, show_thinking: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn save_tui(
+    dir: &str,
+    tools_expanded: bool,
+    show_thinking: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut data: toml::Table = load_config_map(dir)?;
-    set_nested(&mut data, "tui", "tools_expanded", toml::Value::Boolean(tools_expanded));
-    set_nested(&mut data, "tui", "show_thinking", toml::Value::Boolean(show_thinking));
+    set_nested(
+        &mut data,
+        "tui",
+        "tools_expanded",
+        toml::Value::Boolean(tools_expanded),
+    );
+    set_nested(
+        &mut data,
+        "tui",
+        "show_thinking",
+        toml::Value::Boolean(show_thinking),
+    );
     write_config_map(dir, &data)
 }
 
@@ -297,7 +311,10 @@ fn load_config_map(dir: &str) -> Result<toml::Table, Box<dyn std::error::Error +
     }
 }
 
-fn write_config_map(dir: &str, data: &toml::Table) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn write_config_map(
+    dir: &str,
+    data: &toml::Table,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cfg_path = config_path(dir);
     let content = toml::to_string(data)?;
     std::fs::write(&cfg_path, content)?;
@@ -365,8 +382,8 @@ mod tests {
         let data = std::fs::read_to_string(&cfg_path).unwrap();
         let cfg: toml::Table = toml::from_str(&data).unwrap();
         let tui = cfg["tui"].as_table().unwrap();
-        assert_eq!(tui["tools_expanded"].as_bool().unwrap(), true);
-        assert_eq!(tui["show_thinking"].as_bool().unwrap(), false);
+        assert!(tui["tools_expanded"].as_bool().unwrap());
+        assert!(!tui["show_thinking"].as_bool().unwrap());
         let agent = cfg["agent"].as_table().unwrap();
         assert_eq!(agent["max_tool_rounds"].as_integer().unwrap(), 10);
     }

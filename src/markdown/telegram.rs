@@ -1,8 +1,7 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-static RE_CODE_BLOCK: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
+static RE_CODE_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
 static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`[^`\n]+`").unwrap());
 static RE_HEADING: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^#{1,6}\s+(.+)$").unwrap());
 static RE_BOLD1: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
@@ -159,9 +158,7 @@ pub fn markdown_to_telegram(text: &str) -> String {
         })
         .to_string();
 
-    text = RE_LIST
-        .replace_all(&text, "${1}\u{2022}  ")
-        .to_string();
+    text = RE_LIST.replace_all(&text, "${1}\u{2022}  ").to_string();
 
     text = escape_telegram(&text);
 
@@ -291,20 +288,36 @@ mod tests {
     #[test]
     fn test_markdown_to_telegram_code_block() {
         let got = markdown_to_telegram("text\n```\ncode\n```\nmore");
-        assert!(got.contains("code"), "code content should be preserved: {}", got);
+        assert!(
+            got.contains("code"),
+            "code content should be preserved: {}",
+            got
+        );
     }
 
     #[test]
     fn test_markdown_to_telegram_inline_code() {
         let got = markdown_to_telegram("run `ls -la` now");
-        assert!(got.contains("`ls -la`"), "inline code should be preserved: {}", got);
+        assert!(
+            got.contains("`ls -la`"),
+            "inline code should be preserved: {}",
+            got
+        );
     }
 
     #[test]
     fn test_markdown_to_telegram_list() {
         let got = markdown_to_telegram("- item one\n- item two");
-        assert!(got.contains("item one"), "list items should be preserved: {}", got);
-        assert!(!got.contains("- "), "list bullets should be converted: {}", got);
+        assert!(
+            got.contains("item one"),
+            "list items should be preserved: {}",
+            got
+        );
+        assert!(
+            !got.contains("- "),
+            "list bullets should be converted: {}",
+            got
+        );
     }
 
     #[test]
@@ -322,7 +335,11 @@ mod tests {
     #[test]
     fn test_markdown_to_telegram_escape_specials() {
         let got = markdown_to_telegram("test _ underscore");
-        assert!(got.contains("\\_"), "underscore outside formatting should be escaped: {}", got);
+        assert!(
+            got.contains("\\_"),
+            "underscore outside formatting should be escaped: {}",
+            got
+        );
     }
 
     #[test]

@@ -45,7 +45,7 @@ pub fn parse_gitignore(root: &str) -> GitignoreMatcher {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            let is_dir = entry.file_type().map_or(false, |t| t.is_dir());
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
             if is_dir && name_str == ".git" {
                 continue;
             }
@@ -90,10 +90,7 @@ pub fn parse_gitignore(root: &str) -> GitignoreMatcher {
 
     for p in &paths {
         if let Ok(meta) = std::fs::metadata(p) {
-            modtimes.insert(
-                p.clone(),
-                meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-            );
+            modtimes.insert(p.clone(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH));
 
             let rel_dir = Path::new(p).parent().unwrap_or_else(|| Path::new("."));
             let rel: String = if rel_dir == root {

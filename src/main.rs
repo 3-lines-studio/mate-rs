@@ -81,7 +81,12 @@ fn run_cmd(args: &[String]) {
     }
 
     if !model.is_empty() {
-        match mate::core::resolve::resolve_client(&model, &deps.config.models, &deps.config.providers, verbose) {
+        match mate::core::resolve::resolve_client(
+            &model,
+            &deps.config.models,
+            &deps.config.providers,
+            verbose,
+        ) {
             Ok((client, model_name)) => {
                 deps.client = client;
                 deps.model_name = model_name;
@@ -128,22 +133,22 @@ fn run_cmd(args: &[String]) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     while let Some(ev) = rt.block_on(events.recv()) {
         match ev.event_type.as_str() {
-                "text_delta" => {
-                    print!("{}", ev.delta);
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
-                }
-                "tool_error" => {
-                    eprintln!("❌ {}: {}", ev.tool_call_name, ev.tool_error);
-                }
-                "error" => {
-                    eprintln!("Error: {}", ev.error);
-                    std::process::exit(1);
-                }
-                "agent_done" => {
-                    println!();
-                }
-                _ => {}
+            "text_delta" => {
+                print!("{}", ev.delta);
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            }
+            "tool_error" => {
+                eprintln!("❌ {}: {}", ev.tool_call_name, ev.tool_error);
+            }
+            "error" => {
+                eprintln!("Error: {}", ev.error);
+                std::process::exit(1);
+            }
+            "agent_done" => {
+                println!();
+            }
+            _ => {}
         }
     }
 }
@@ -190,8 +195,7 @@ fn clean_cmd(args: &[String]) {
         let age_days = (chrono::Utc::now().timestamp() - s.updated_at.timestamp()) / 86400;
         let size = session_size(&deps.store.dir(), &s.id);
 
-        let delete_it = all
-            || older_than.is_some_and(|ot| ot > 0 && age_days as usize >= ot);
+        let delete_it = all || older_than.is_some_and(|ot| ot > 0 && age_days as usize >= ot);
 
         if !delete_it {
             println!(
@@ -261,7 +265,12 @@ fn default_cmd(args: &[String]) {
     }
 
     if !model.is_empty() {
-        match mate::core::resolve::resolve_client(&model, &deps.config.models, &deps.config.providers, verbose) {
+        match mate::core::resolve::resolve_client(
+            &model,
+            &deps.config.models,
+            &deps.config.providers,
+            verbose,
+        ) {
             Ok((client, model_name)) => {
                 deps.client = client;
                 deps.model_name = model_name;
@@ -380,7 +389,11 @@ fn format_bytes(b: i64) -> String {
         exp += 1;
         n /= UNIT;
     }
-    format!("{:.1} {}B", b as f64 / div as f64, "KMGTPE".as_bytes()[exp] as char)
+    format!(
+        "{:.1} {}B",
+        b as f64 / div as f64,
+        "KMGTPE".as_bytes()[exp] as char
+    )
 }
 
 #[cfg(unix)]

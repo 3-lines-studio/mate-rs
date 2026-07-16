@@ -1,97 +1,40 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
-    text::{Line, Span, Text},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
 
-use super::chat_format::{format_tokens, tool_color, format_tool_label, result_lang};
+use super::chat_format::{format_tool_label, result_lang, tool_color};
 use crate::render::highlight;
 
-pub fn render_status_line(
-    f: &mut Frame,
-    area: Rect,
-    model_name: &str,
-    total_tokens: i32,
-    context_window: i32,
-    cache_hit_tokens: i32,
-    total_cost: f64,
-    session_name: &str,
-    has_more: bool,
-) {
-    let accent = Color::from_u32(0x00FFC799);
-    let muted = Color::from_u32(0x006A6A6A);
-    let warning = Color::from_u32(0x00FFCB8B);
+const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
-    let mut spans = vec![Span::styled(model_name.to_string(), Style::default().fg(accent))];
-
-    if context_window > 0 {
-        let mut token_info = format!(
-            " {}/{}",
-            format_tokens(total_tokens),
-            format_tokens(context_window)
-        );
-        if cache_hit_tokens > 0 {
-            token_info.push_str(&format!(" · {} cached", format_tokens(cache_hit_tokens)));
-        }
-        spans.push(Span::styled(token_info, Style::default().fg(muted)));
-    }
-
-    let left_text = Text::from(Line::from(spans));
-
-    let mut right_spans = Vec::new();
-    if total_cost > 0.0 {
-        right_spans.push(Span::styled(
-            format!("${:.4} ", total_cost),
-            Style::default().fg(muted),
-        ));
-    }
-    right_spans.push(Span::styled(
-        session_name.to_string(),
-        Style::default().fg(muted),
-    ));
-    if has_more {
-        right_spans.push(Span::styled(" [more]", Style::default().fg(warning)));
-    }
-
-    let right_text = Text::from(Line::from(right_spans));
-
-    let left_w = left_text.width() as u16;
-    let right_w = right_text.width() as u16;
-    let padding = area.width.saturating_sub(left_w).saturating_sub(right_w);
-
-    let full_line = Line::from(vec![
-        Span::from(left_text.lines[0].spans[0].clone()),
-        Span::from(" ".repeat(padding as usize)),
-        Span::from(right_text.lines[0].spans[0].clone()),
-    ]);
-
-    f.render_widget(
-        Paragraph::new(full_line).style(Style::default().fg(Color::from_u32(0x006A6A6A))),
-        area,
-    );
+pub fn thinking_indicator(
+    ticks: usize,
+    label: &str,
+    elapsed: std::time::Duration,
+) -> Line<'static> {
+    let frame = SPINNER[ticks % SPINNER.len()];
+    Line::from(vec![
+        Span::styled(
+            frame.to_string(),
+            Style::default().fg(Color::from_u32(0x00BB9AF7)),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            label.to_string(),
+            Style::default().fg(Color::from_u32(0x00BB9AF7)),
+        ),
+        Span::styled(
+            format!(" ({:.0?})", elapsed),
+            Style::default().fg(Color::from_u32(0x006C6C6C)),
+        ),
+    ])
 }
 
-const RAINBOW: [u32; 6] = [0xFF6B6B, 0xFFA94D, 0xFFD43B, 0x69DB7C, 0x4DABF7, 0x9775FA];
-
-pub fn rainbow_text(text: &str, offset: usize) -> Text<'static> {
-    let spans: Vec<Span> = text
-        .chars()
-        .enumerate()
-        .map(|(i, c)| {
-            let color_idx = (i + offset) % RAINBOW.len();
-            Span::styled(
-                c.to_string(),
-                Style::default()
-                    .fg(Color::from_u32(RAINBOW[color_idx]))
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )
-        })
-        .collect();
-    Text::from(Line::from(spans))
-}
-
+#[allow(clippy::too_many_arguments)]
 pub fn render_tool_block(
     name: &str,
     args: &str,
@@ -109,7 +52,11 @@ pub fn render_tool_block(
     let field_prefix = " ".repeat(indent + 2);
 
     let label = format_tool_label(cwd, name, args);
-    let label = if label.is_empty() { name.to_string() } else { label };
+    let label = if label.is_empty() {
+        name.to_string()
+    } else {
+        label
+    };
     let is_running = result.is_empty() && error.is_empty() && duration.is_empty();
 
     let symbol = if is_running {
@@ -187,7 +134,8 @@ pub fn render_tool_block(
         let max_lines = 50;
         let display_lines: Vec<String> = if lines.len() > max_lines {
             let trunc_msg = format!("... (truncated, {} more lines)", lines.len() - max_lines);
-            let mut truncated: Vec<String> = lines[..max_lines].iter().map(|s| s.to_string()).collect();
+            let mut truncated: Vec<String> =
+                lines[..max_lines].iter().map(|s| s.to_string()).collect();
             truncated.push(trunc_msg);
             truncated
         } else {
@@ -195,7 +143,8 @@ pub fn render_tool_block(
         };
 
         for line in display_lines {
-            let truncated = crate::render::block::truncate(&line, width.saturating_sub(indent + 2), "…");
+            let truncated =
+                crate::render::block::truncate(&line, width.saturating_sub(indent + 2), "…");
             out.push_str(&field_prefix);
             out.push_str(&truncated);
             out.push('\n');
@@ -242,7 +191,8 @@ fn truncate_value(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        let safe_len = s.char_indices()
+        let safe_len = s
+            .char_indices()
             .take_while(|(i, _)| *i < max_len)
             .last()
             .map(|(i, c)| i + c.len_utf8())
@@ -250,4 +200,82 @@ fn truncate_value(s: &str, max_len: usize) -> String {
         let safe = &s[..safe_len];
         format!("{}... ({} bytes)", safe, s.len())
     }
+}
+
+pub fn git_branch(cwd: &str) -> Option<String> {
+    let mut dir: &std::path::Path = std::path::Path::new(cwd);
+    loop {
+        let head = dir.join(".git").join("HEAD");
+        if let Ok(content) = std::fs::read_to_string(&head) {
+            let trimmed = content.trim();
+            if let Some(branch) = trimmed.strip_prefix("ref: refs/heads/") {
+                return Some(branch.to_string());
+            }
+            if trimmed.len() >= 7 {
+                return Some(trimmed[..7].to_string());
+            }
+            return Some(trimmed.to_string());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+fn shorten_cwd(cwd: &str) -> String {
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = home.to_string_lossy();
+        if cwd.starts_with(&*home) {
+            return format!("~/{}", &cwd[home.len()..]);
+        }
+    }
+    cwd.to_string()
+}
+
+pub fn render_top_bar(f: &mut Frame, area: Rect, cwd: &str, model: &str) {
+    let gray = Color::from_u32(0x006C6C6C);
+    let bright = Color::from_u32(0x00C8C8C8);
+
+    let mut spans = Vec::new();
+    if let Some(branch) = git_branch(cwd) {
+        spans.push(Span::styled(
+            format!(" {branch}"),
+            Style::default().fg(bright),
+        ));
+    }
+    let display_cwd = shorten_cwd(cwd);
+    spans.push(Span::styled(
+        format!("  {display_cwd}"),
+        Style::default().fg(gray),
+    ));
+
+    if !model.is_empty() {
+        let left_w: usize = spans.iter().map(|s| s.width()).sum();
+        let model_text = format!(" {model}");
+        let model_w = model_text.len();
+        let pad = (area.width as usize)
+            .saturating_sub(left_w)
+            .saturating_sub(model_w);
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.push(Span::styled(model_text, Style::default().fg(gray)));
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+pub fn render_shortcuts_bar(f: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
+    let key_style = Style::default()
+        .fg(Color::from_u32(0x00C8C8C8))
+        .add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(Color::from_u32(0x006C6C6C));
+    let sep = Span::styled("  │  ", Style::default().fg(Color::from_u32(0x006C6C6C)));
+
+    let mut spans = Vec::new();
+    for (i, (key, label)) in hints.iter().enumerate() {
+        if i > 0 {
+            spans.push(sep.clone());
+        }
+        spans.push(Span::styled(format!(" {key} "), key_style));
+        spans.push(Span::styled(*label, label_style));
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

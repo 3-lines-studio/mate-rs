@@ -106,8 +106,7 @@ async fn tg_edit_message_text(
     text: &str,
     parse_mode: Option<&str>,
 ) -> Result<(), String> {
-    let mut body =
-        serde_json::json!({"chat_id": chat_id, "message_id": message_id, "text": text});
+    let mut body = serde_json::json!({"chat_id": chat_id, "message_id": message_id, "text": text});
     if let Some(pm) = parse_mode {
         body["parse_mode"] = serde_json::Value::String(pm.to_string());
     }
@@ -156,8 +155,15 @@ async fn do_flush(
     if display.is_empty() {
         return;
     }
-    if let Err(e) =
-        tg_edit_message_text(client, token, chat_id, message_id, &display, Some("MarkdownV2")).await
+    if let Err(e) = tg_edit_message_text(
+        client,
+        token,
+        chat_id,
+        message_id,
+        &display,
+        Some("MarkdownV2"),
+    )
+    .await
     {
         log::error!("telegram update message: {}", e);
     }
@@ -178,9 +184,19 @@ async fn do_finalize(
             chunk.truncate(TELEGRAM_TEXT_LIMIT);
         }
         let result = if i == 0 {
-            tg_edit_message_text(client, token, chat_id, message_id, &chunk, Some("MarkdownV2")).await
+            tg_edit_message_text(
+                client,
+                token,
+                chat_id,
+                message_id,
+                &chunk,
+                Some("MarkdownV2"),
+            )
+            .await
         } else {
-            tg_send_message(client, token, chat_id, &chunk, Some("MarkdownV2")).await.map(|_| ())
+            tg_send_message(client, token, chat_id, &chunk, Some("MarkdownV2"))
+                .await
+                .map(|_| ())
         };
         if let Err(e) = result {
             log::error!("telegram finalize: {}", e);
@@ -250,9 +266,14 @@ impl BotInner {
         };
 
         if text == "/chatid" {
-            let _ =
-                tg_send_message(&self.client, &self.token, chat_id, &chat_id.to_string(), None)
-                    .await;
+            let _ = tg_send_message(
+                &self.client,
+                &self.token,
+                chat_id,
+                &chat_id.to_string(),
+                None,
+            )
+            .await;
             return;
         }
 
@@ -403,7 +424,8 @@ impl Interface for BotAdapter {
         let key_store_path = format!("{}/chat_sessions.json", deps.store.dir());
         let manager = deps.new_session_manager(&key_store_path)?;
 
-        let allowed_users: HashSet<i64> = deps.config.telegram.allowed_users.iter().cloned().collect();
+        let allowed_users: HashSet<i64> =
+            deps.config.telegram.allowed_users.iter().cloned().collect();
 
         let bot = Arc::new(BotInner {
             client: reqwest::Client::new(),
@@ -447,9 +469,15 @@ impl Notifier for TelegramNotifier {
             .map_err(|_| format!("telegram invalid chat_id: {}", channel))?;
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async {
-            tg_send_message(&self.client, &self.bot_token, chat_id, message, Some("MarkdownV2"))
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+            tg_send_message(
+                &self.client,
+                &self.bot_token,
+                chat_id,
+                message,
+                Some("MarkdownV2"),
+            )
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
             Ok(())
         })
     }
@@ -512,9 +540,16 @@ mod tests {
     fn dummy_manager() -> SessionManager {
         use crate::session::store::Store;
         use crate::session::{Cache, KeyStore, Session};
-        let store = Store::new("/tmp/mate-test-nonexistent").unwrap_or_else(|_| Store::new(".").unwrap());
-        let ks = KeyStore::new("/tmp/mate-test-ks-dummy.json").unwrap_or_else(|_| KeyStore::new("./dummy-ks.json").unwrap());
+        let store =
+            Store::new("/tmp/mate-test-nonexistent").unwrap_or_else(|_| Store::new(".").unwrap());
+        let ks = KeyStore::new("/tmp/mate-test-ks-dummy.json")
+            .unwrap_or_else(|_| KeyStore::new("./dummy-ks.json").unwrap());
         let cache = Cache::new(1);
-        SessionManager::new(store, cache, ks, Box::new(|_s: Session| panic!("factory should not be called")))
+        SessionManager::new(
+            store,
+            cache,
+            ks,
+            Box::new(|_s: Session| panic!("factory should not be called")),
+        )
     }
 }

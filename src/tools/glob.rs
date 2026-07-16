@@ -31,10 +31,7 @@ pub fn tool() -> Tool {
         serde_json::json!({"type": "integer", "description": "Maximum results (default: 50)"}),
     );
     params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert(
-        "required".to_string(),
-        serde_json::json!(["pattern"]),
-    );
+    params.insert("required".to_string(), serde_json::json!(["pattern"]));
 
     define_tool(
         "glob",
@@ -112,13 +109,7 @@ fn walk_dir_glob(
 fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git"
-            | "node_modules"
-            | "vendor"
-            | ".idea"
-            | ".vscode"
-            | "__pycache__"
-            | ".pytest_cache"
+        ".git" | "node_modules" | "vendor" | ".idea" | ".vscode" | "__pycache__" | ".pytest_cache"
     )
 }
 

@@ -135,6 +135,7 @@ impl ChatMsg {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_agent_event(
     event: &Event,
     live_blocks: &mut Vec<LiveBlock>,
@@ -200,27 +201,34 @@ pub fn handle_agent_event(
             }
         }
         "retry" => {
-            messages.push(ChatMsg::error(&event.error));
+            if event.subagent.is_empty() {
+                messages.push(ChatMsg::error(&event.error));
+            }
         }
         "retry_available" => {
-            messages.push(ChatMsg::error(&format!("{} — Press Ctrl+R to retry", event.error)));
-            *retry_available = true;
-            *finished = true;
+            if event.subagent.is_empty() {
+                messages.push(ChatMsg::error(&format!(
+                    "{} — Press Ctrl+R to retry",
+                    event.error
+                )));
+                *retry_available = true;
+                *finished = true;
+            }
         }
         "error" => {
-            messages.push(ChatMsg::error(&event.error));
-            *finished = true;
-        }
-        "usage" => {
             if event.subagent.is_empty() {
-                if let Some(ref usage) = event.usage {
-                    *total_tokens = usage.total_tokens;
-                    *cache_hit_tokens = usage.prompt_cache_hit_tokens;
-                }
-                if let Some(asession) = active_session {
-                    *total_tokens = asession.context_tokens();
-                    *total_cost = asession.sess().cost;
-                }
+                messages.push(ChatMsg::error(&event.error));
+                *finished = true;
+            }
+        }
+        "usage" if event.subagent.is_empty() => {
+            if let Some(ref usage) = event.usage {
+                *total_tokens = usage.total_tokens;
+                *cache_hit_tokens = usage.prompt_cache_hit_tokens;
+            }
+            if let Some(asession) = active_session {
+                *total_tokens = asession.context_tokens();
+                *total_cost = asession.sess().cost;
             }
         }
         _ => {}

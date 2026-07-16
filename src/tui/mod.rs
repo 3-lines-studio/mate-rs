@@ -7,15 +7,19 @@ pub mod file_picker;
 pub mod session_list;
 pub mod theme;
 
-use std::time::{Duration, Instant};
-use crossterm::event::{self, EnableMouseCapture, DisableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
-use crossterm::execute;
 use crate::agent::Event;
 use crate::core::Deps;
 use crate::message::Message;
 use crate::session::Session;
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEventKind,
+    KeyModifiers, MouseEventKind,
+};
+use crossterm::execute;
+use std::time::{Duration, Instant};
 
 use chat::{ChatScreen, Modal};
+use chat_render::{render_shortcuts_bar, render_top_bar};
 use session_list::SessionListScreen;
 
 enum AppState {
@@ -80,11 +84,17 @@ impl App {
                 for event in pending_events {
                     self.handle_agent_event(event);
                 }
-                if self.chat.events.is_none() || self.chat.events.as_ref().map(|r| r.is_closed()).unwrap_or(true) {
-                    if self.chat.waiting {
-                        self.chat.finish_bot_message_now();
-                        self.chat.waiting = false;
-                    }
+                if (self.chat.events.is_none()
+                    || self
+                        .chat
+                        .events
+                        .as_ref()
+                        .map(|r| r.is_closed())
+                        .unwrap_or(true))
+                    && self.chat.waiting
+                {
+                    self.chat.finish_bot_message_now();
+                    self.chat.waiting = false;
                 }
                 self.chat.wait_ticks += 1;
             }
@@ -104,13 +114,36 @@ impl App {
         let area = f.area();
         match self.state {
             AppState::SessionList => {
-                self.session_list.render(f, area);
-                let help_text = "↑/↓ navigate  enter select  n new  d delete  q quit";
-                let help = ratatui::widgets::Paragraph::new(help_text)
-                    .style(ratatui::style::Style::default().fg(ratatui::style::Color::from_u32(0x006A6A6A)))
-                    .alignment(ratatui::layout::Alignment::Center);
-                let help_area = ratatui::layout::Rect::new(area.x, area.height.saturating_sub(1), area.width, 1);
-                f.render_widget(help, help_area);
+                render_top_bar(
+                    f,
+                    ratatui::layout::Rect::new(area.x, area.y, area.width, 1),
+                    &self.deps.cwd,
+                    "",
+                );
+                let list_area = ratatui::layout::Rect::new(
+                    area.x,
+                    area.y + 1,
+                    area.width,
+                    area.height.saturating_sub(2),
+                );
+                self.session_list.render(f, list_area);
+                let shortcuts_area = ratatui::layout::Rect::new(
+                    area.x,
+                    area.height.saturating_sub(1),
+                    area.width,
+                    1,
+                );
+                render_shortcuts_bar(
+                    f,
+                    shortcuts_area,
+                    &[
+                        ("↑↓", "navigate"),
+                        ("enter", "select"),
+                        ("n", "new"),
+                        ("d", "delete"),
+                        ("q", "quit"),
+                    ],
+                );
             }
             AppState::Chat => {
                 self.chat.render(f);
@@ -119,11 +152,17 @@ impl App {
                 let name = &session.name;
                 let dialog = format!("Delete \"{}\"?\n\n[y] yes  [n] no  [esc] cancel", name);
                 let p = ratatui::widgets::Paragraph::new(dialog)
-                    .style(ratatui::style::Style::default().fg(ratatui::style::Color::from_u32(0x00FF8080)))
+                    .style(
+                        ratatui::style::Style::default()
+                            .fg(ratatui::style::Color::from_u32(0x00F7768E)),
+                    )
                     .block(
                         ratatui::widgets::Block::default()
                             .borders(ratatui::widgets::Borders::ALL)
-                            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::from_u32(0x00FF8080))),
+                            .border_style(
+                                ratatui::style::Style::default()
+                                    .fg(ratatui::style::Color::from_u32(0x00F7768E)),
+                            ),
                     )
                     .alignment(ratatui::layout::Alignment::Center);
 
@@ -145,250 +184,227 @@ impl App {
                 let alt = key.modifiers.contains(KeyModifiers::ALT);
 
                 match self.state {
-                    AppState::ConfirmDelete(_) => {
-                        match code {
-                            KeyCode::Char('y') => {
-                                if let AppState::ConfirmDelete(ref sess) = self.state {
-                                    let sid = sess.id.clone();
-                                    let _ = self.deps.store.delete(&sid);
-                                    self.session_list.load(&mut self.deps.store);
-                                    self.state = AppState::SessionList;
-                                }
-                            }
-                            KeyCode::Char('n') | KeyCode::Esc => {
+                    AppState::ConfirmDelete(_) => match code {
+                        KeyCode::Char('y') => {
+                            if let AppState::ConfirmDelete(ref sess) = self.state {
+                                let sid = sess.id.clone();
+                                let _ = self.deps.store.delete(&sid);
+                                self.session_list.load(&mut self.deps.store);
                                 self.state = AppState::SessionList;
                             }
-                            _ => {}
                         }
-                    }
-                    AppState::SessionList => {
-                        match code {
-                            KeyCode::Char('q') => {
-                                self.should_quit = true;
+                        KeyCode::Char('n') | KeyCode::Esc => {
+                            self.state = AppState::SessionList;
+                        }
+                        _ => {}
+                    },
+                    AppState::SessionList => match code {
+                        KeyCode::Char('q') => {
+                            self.should_quit = true;
+                        }
+                        KeyCode::Char('n') => {
+                            if let Ok(sess) = self.deps.store.create() {
+                                self.switch_to_session(sess);
                             }
-                            KeyCode::Char('n') => {
+                        }
+                        KeyCode::Up => {
+                            self.session_list.select_up();
+                        }
+                        KeyCode::Down => {
+                            self.session_list.select_down();
+                        }
+                        KeyCode::Enter => {
+                            if self.session_list.is_new_selected() {
                                 if let Ok(sess) = self.deps.store.create() {
                                     self.switch_to_session(sess);
                                 }
-                            }
-                            KeyCode::Up => {
-                                self.session_list.select_up();
-                            }
-                            KeyCode::Down => {
-                                self.session_list.select_down();
-                            }
-                            KeyCode::Enter => {
-                                if self.session_list.is_new_selected() {
-                                    if let Ok(sess) = self.deps.store.create() {
-                                        self.switch_to_session(sess);
-                                    }
-                                } else if let Some(sess) = self.session_list.selected_session() {
-                                    if let Ok(sess) = self.deps.store.load(&sess.id.clone()) {
-                                        self.switch_to_session(sess);
-                                    }
+                            } else if let Some(sess) = self.session_list.selected_session() {
+                                if let Ok(sess) = self.deps.store.load(&sess.id.clone()) {
+                                    self.switch_to_session(sess);
                                 }
                             }
-                            KeyCode::Char('d') => {
-                                if let Some(session) = self.session_list.selected_session() {
-                                    self.state = AppState::ConfirmDelete(session.clone());
-                                }
-                            }
-                            _ => {}
                         }
-                    }
-                    AppState::Chat => {
-                        match (ctrl, alt, code) {
-                            (true, false, KeyCode::Char('c')) => {
-                                if self.chat.waiting || self.chat.compacting {
-                                    self.chat.finish_bot_message_now();
-                                    self.chat.waiting = false;
-                                    self.chat.compacting = false;
-                                    return;
-                                }
-                                if !self.chat.textarea.is_empty() {
-                                    self.chat.clear_textarea();
-                                    self.chat.ctrl_c_pending = true;
-                                    return;
-                                }
-                                if self.chat.ctrl_c_pending {
-                                    self.should_quit = true;
-                                    return;
-                                }
+                        KeyCode::Char('d') => {
+                            if let Some(session) = self.session_list.selected_session() {
+                                self.state = AppState::ConfirmDelete(session.clone());
+                            }
+                        }
+                        _ => {}
+                    },
+                    AppState::Chat => match (ctrl, alt, code) {
+                        (true, false, KeyCode::Char('c')) => {
+                            if self.chat.waiting || self.chat.compacting {
+                                self.chat.finish_bot_message_now();
+                                self.chat.waiting = false;
+                                self.chat.compacting = false;
+                                return;
+                            }
+                            if !self.chat.textarea.is_empty() {
+                                self.chat.clear_textarea();
                                 self.chat.ctrl_c_pending = true;
+                                return;
                             }
-                            (false, false, KeyCode::Esc) => {
-                                if self.chat.active_modal != Modal::None {
-                                    self.chat.close_dropdowns();
-                                    return;
-                                }
-                                if self.chat.waiting || self.chat.compacting {
-                                    self.chat.events = None;
-                                    self.chat.finish_bot_message_now();
-                                    self.chat.waiting = false;
-                                    self.chat.compacting = false;
-                                    return;
-                                }
-                                self.reload_current_session();
-                                self.state = AppState::SessionList;
-                                self.chat.reset();
-                                self.session_list.load(&mut self.deps.store);
+                            if self.chat.ctrl_c_pending {
+                                self.should_quit = true;
+                                return;
                             }
-                            (false, false, KeyCode::Enter)
-                                if self.chat.active_modal == Modal::Command =>
+                            self.chat.ctrl_c_pending = true;
+                        }
+                        (false, false, KeyCode::Esc) => {
+                            if self.chat.active_modal != Modal::None {
+                                self.chat.close_dropdowns();
+                                return;
+                            }
+                            if self.chat.waiting || self.chat.compacting {
+                                self.chat.events = None;
+                                self.chat.finish_bot_message_now();
+                                self.chat.waiting = false;
+                                self.chat.compacting = false;
+                                return;
+                            }
+                            self.reload_current_session();
+                            self.state = AppState::SessionList;
+                            self.chat.reset();
+                            self.session_list.load(&mut self.deps.store);
+                        }
+                        (false, false, KeyCode::Enter)
+                            if self.chat.active_modal == Modal::Command =>
+                        {
+                            if let Some((_, action)) = self.chat.command_dropdown.selected_item() {
+                                let action = action.clone();
+                                self.chat.close_dropdowns();
+                                self.execute_command(&action);
+                            }
+                        }
+                        (false, false, KeyCode::Enter)
+                            if self.chat.active_modal == Modal::Template =>
+                        {
+                            if let Some((template, _)) = self.chat.template_dropdown.selected_item()
                             {
-                                if let Some((_, action)) = self.chat.command_dropdown.selected_item() {
-                                    let action = action.clone();
-                                    self.chat.close_dropdowns();
-                                    self.execute_command(&action);
-                                }
+                                let name = template.name.clone();
+                                self.chat.close_dropdowns();
+                                let val = format!("/{} ", name);
+                                self.chat.set_text(&val);
                             }
-                            (false, false, KeyCode::Enter)
-                                if self.chat.active_modal == Modal::Template =>
-                            {
-                                if let Some((template, _)) = self.chat.template_dropdown.selected_item() {
-                                    let name = template.name.clone();
-                                    self.chat.close_dropdowns();
-                                    let val = format!("/{} ", name);
-                                    self.chat.set_text(&val);
-                                }
+                        }
+                        (false, false, KeyCode::Enter) if self.chat.active_modal == Modal::File => {
+                            if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
+                                let path = path.clone();
+                                self.chat.close_dropdowns();
+                                let val = format!("{} ", path);
+                                self.chat.set_text(&val);
                             }
-                            (false, false, KeyCode::Enter)
-                                if self.chat.active_modal == Modal::File =>
-                            {
-                                if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
-                                    let path = path.clone();
-                                    self.chat.close_dropdowns();
-                                    let val = format!("{} ", path);
-                                    self.chat.set_text(&val);
-                                }
-                            }
-                            (true, false, KeyCode::Char('p')) => {
-                                self.chat.open_command_dropdown();
-                            }
-                            (false, false, KeyCode::Char('/')) => {
-                                self.chat.insert_char('/');
-                                self.chat.open_template_dropdown("");
-                            }
-                            (false, false, KeyCode::Char('@')) => {
-                                self.chat.insert_char('@');
-                                self.chat.ensure_files_loaded();
-                                self.chat.open_file_dropdown("");
-                            }
-                            (true, false, KeyCode::Char('r')) => {
-                                if self.chat.retry_available {
-                                    if let Some(ref asession) = self.chat.active_session {
-                                        match asession.retry() {
-                                            Ok(events) => {
-                                                self.chat.events = Some(events);
-                                                self.chat.waiting = true;
-                                                self.chat.wait_start = Instant::now();
-                                                self.chat.wait_ticks = 0;
-                                                self.chat.retry_available = false;
-                                                self.chat.user_scrolled_up = false;
-                                                self.chat.scroll_to_bottom();
-                                            }
-                                            Err(e) => {
-                                                self.chat.add_message("error", &e);
-                                            }
+                        }
+                        (true, false, KeyCode::Char('p')) => {
+                            self.chat.open_command_dropdown();
+                        }
+                        (false, false, KeyCode::Char('/')) => {
+                            self.chat.insert_char('/');
+                            self.chat.open_template_dropdown("");
+                        }
+                        (false, false, KeyCode::Char('@')) => {
+                            self.chat.insert_char('@');
+                            self.chat.ensure_files_loaded();
+                            self.chat.open_file_dropdown("");
+                        }
+                        (true, false, KeyCode::Char('r')) => {
+                            if self.chat.retry_available {
+                                if let Some(ref asession) = self.chat.active_session {
+                                    match asession.retry() {
+                                        Ok(events) => {
+                                            self.chat.events = Some(events);
+                                            self.chat.waiting = true;
+                                            self.chat.wait_start = Instant::now();
+                                            self.chat.wait_ticks = 0;
+                                            self.chat.retry_available = false;
+                                            self.chat.user_scrolled_up = false;
+                                            self.chat.scroll_to_bottom();
+                                        }
+                                        Err(e) => {
+                                            self.chat.add_message("error", &e);
                                         }
                                     }
                                 }
                             }
-                            (false, true, KeyCode::Enter) | (true, false, KeyCode::Char('j')) => {
-                                if !self.chat.textarea.is_empty() {
-                                    self.submit_prompt();
-                                }
+                        }
+                        (false, true, KeyCode::Enter) | (true, false, KeyCode::Char('j')) => {
+                            if !self.chat.textarea.is_empty() {
+                                self.submit_prompt();
                             }
-                            (false, false, KeyCode::Tab)
-                                if self.chat.active_modal == Modal::Template =>
+                        }
+                        (false, false, KeyCode::Tab)
+                            if self.chat.active_modal == Modal::Template =>
+                        {
+                            if let Some((template, _)) = self.chat.template_dropdown.selected_item()
                             {
-                                if let Some((template, _)) = self.chat.template_dropdown.selected_item() {
-                                    let name = template.name.clone();
-                                    self.chat.close_dropdowns();
-                                    let val = format!("/{} ", name);
-                                    self.chat.set_text(&val);
-                                }
+                                let name = template.name.clone();
+                                self.chat.close_dropdowns();
+                                let val = format!("/{} ", name);
+                                self.chat.set_text(&val);
                             }
-                            (false, false, KeyCode::Tab)
-                                if self.chat.active_modal == Modal::File =>
-                            {
-                                if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
-                                    let path = path.clone();
-                                    self.chat.close_dropdowns();
-                                    let val = format!("{} ", path);
-                                    self.chat.set_text(&val);
-                                }
+                        }
+                        (false, false, KeyCode::Tab) if self.chat.active_modal == Modal::File => {
+                            if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
+                                let path = path.clone();
+                                self.chat.close_dropdowns();
+                                let val = format!("{} ", path);
+                                self.chat.set_text(&val);
                             }
-                            _ => {
-                                if self.chat.waiting {
-                                    return;
+                        }
+                        _ => {
+                            if self.chat.waiting {
+                                return;
+                            }
+                            if self.chat.active_modal != Modal::None {
+                                self.handle_modal_key(code);
+                                return;
+                            }
+                            match code {
+                                KeyCode::Up => {
+                                    if self.chat.history_idx + 1 < self.chat.history.len() as isize
+                                    {
+                                        self.chat.history_idx += 1;
+                                        let idx = self
+                                            .chat
+                                            .history
+                                            .len()
+                                            .saturating_sub(1 + self.chat.history_idx as usize);
+                                        self.chat.set_text(&self.chat.history[idx].clone());
+                                    }
                                 }
-                                if self.chat.active_modal != Modal::None {
-                                    self.handle_modal_key(code);
-                                    return;
-                                }
-                                match code {
-                                    KeyCode::Up => {
-                                        if self.chat.history_idx + 1
-                                            < self.chat.history.len() as isize
-                                        {
-                                            self.chat.history_idx += 1;
-                                            let idx = self
-                                                .chat
-                                                .history
-                                                .len()
-                                                .saturating_sub(
+                                KeyCode::Down => {
+                                    if self.chat.history_idx >= 0 {
+                                        self.chat.history_idx -= 1;
+                                        if self.chat.history_idx >= 0 {
+                                            let idx =
+                                                self.chat.history.len().saturating_sub(
                                                     1 + self.chat.history_idx as usize,
                                                 );
-                                            self.chat.set_text(
-                                                &self.chat.history[idx].clone(),
-                                            );
+                                            self.chat.set_text(&self.chat.history[idx].clone());
+                                        } else {
+                                            self.chat.clear_textarea();
                                         }
                                     }
-                                    KeyCode::Down => {
-                                        if self.chat.history_idx >= 0 {
-                                            self.chat.history_idx -= 1;
-                                            if self.chat.history_idx >= 0 {
-                                                let idx = self
-                                                    .chat
-                                                    .history
-                                                    .len()
-                                                    .saturating_sub(
-                                                        1 + self.chat.history_idx
-                                                            as usize,
-                                                    );
-                                                self.chat.set_text(
-                                                    &self.chat.history[idx].clone(),
-                                                );
-                                            } else {
-                                                self.chat.clear_textarea();
-                                            }
-                                        }
-                                    }
-                                    KeyCode::Left => self.chat.cursor_left(),
-                                    KeyCode::Right => self.chat.cursor_right(),
-                                    KeyCode::Home => self.chat.cursor_home(),
-                                    KeyCode::End => self.chat.cursor_end(),
-                                    KeyCode::Backspace => {
-                                        self.chat.delete_before_cursor()
-                                    }
-                                    KeyCode::Enter => self.chat.insert_char('\n'),
-                                    KeyCode::Char(c) => self.chat.insert_char(c),
-                                    KeyCode::PageUp => {
-                                        self.chat.viewport_offset =
-                                            self.chat.viewport_offset.saturating_sub(
-                                                10,
-                                            );
-                                        self.chat.user_scrolled_up = true;
-                                    }
-                                    KeyCode::PageDown => {
-                                        self.chat.viewport_offset += 10;
-                                    }
-                                    _ => {}
                                 }
+                                KeyCode::Left => self.chat.cursor_left(),
+                                KeyCode::Right => self.chat.cursor_right(),
+                                KeyCode::Home => self.chat.cursor_home(),
+                                KeyCode::End => self.chat.cursor_end(),
+                                KeyCode::Backspace => self.chat.delete_before_cursor(),
+                                KeyCode::Enter => self.chat.insert_char('\n'),
+                                KeyCode::Char(c) => self.chat.insert_char(c),
+                                KeyCode::PageUp => {
+                                    self.chat.viewport_offset =
+                                        self.chat.viewport_offset.saturating_sub(10);
+                                    self.chat.user_scrolled_up = true;
+                                }
+                                KeyCode::PageDown => {
+                                    self.chat.viewport_offset += 10;
+                                }
+                                _ => {}
                             }
                         }
-                    }
+                    },
                 }
             }
             CrosstermEvent::Resize(_, _) => {}
@@ -396,8 +412,7 @@ impl App {
                 if matches!(self.state, AppState::Chat) {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => {
-                            self.chat.viewport_offset =
-                                self.chat.viewport_offset.saturating_sub(3);
+                            self.chat.viewport_offset = self.chat.viewport_offset.saturating_sub(3);
                             self.chat.user_scrolled_up = true;
                         }
                         MouseEventKind::ScrollDown => {
@@ -461,6 +476,7 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
+        self.chat.clear_textarea();
         let expanded = crate::prompts::expand_text(&self.chat.templates, &text);
         self.chat.add_message("user", &expanded);
 
@@ -468,7 +484,8 @@ impl App {
             let sess = match self.deps.store.create() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.chat.add_message("error", &format!("Failed to create session: {}", e));
+                    self.chat
+                        .add_message("error", &format!("Failed to create session: {}", e));
                     return;
                 }
             };
@@ -504,7 +521,7 @@ impl App {
             self.reload_current_session();
             return;
         }
-        if event.event_type == "error" {
+        if event.event_type == "error" && event.subagent.is_empty() {
             self.chat.handle_agent_event_inner(&event);
             self.reload_current_session();
             return;
@@ -584,12 +601,20 @@ impl App {
             "tools" => {
                 self.chat.tools_expanded = !self.chat.tools_expanded;
                 self.chat.render_messages();
-                let _ = crate::config::save_tui(&self.deps.config_dir, self.chat.tools_expanded, self.chat.show_thinking);
+                let _ = crate::config::save_tui(
+                    &self.deps.config_dir,
+                    self.chat.tools_expanded,
+                    self.chat.show_thinking,
+                );
             }
             "thinking" => {
                 self.chat.show_thinking = !self.chat.show_thinking;
                 self.chat.render_messages();
-                let _ = crate::config::save_tui(&self.deps.config_dir, self.chat.tools_expanded, self.chat.show_thinking);
+                let _ = crate::config::save_tui(
+                    &self.deps.config_dir,
+                    self.chat.tools_expanded,
+                    self.chat.show_thinking,
+                );
             }
             "copy-last" => {
                 self.chat.copy_last_response();
@@ -601,7 +626,8 @@ impl App {
                 if let Some(ref asession) = self.chat.active_session {
                     let sid = asession.sess().id;
                     if let Ok(index) = self.deps.store.turn_index(&sid) {
-                        self.chat.build_tree_from_index(&index, &asession.sess().current_turn);
+                        self.chat
+                            .build_tree_from_index(&index, &asession.sess().current_turn);
                         self.chat.show_tree();
                     }
                 }

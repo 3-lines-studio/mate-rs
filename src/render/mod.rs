@@ -3,12 +3,15 @@ pub mod highlight;
 pub mod table;
 pub mod theme;
 
-use block::{header_style, inline_format, styled, visible_width, wordwrap, truncate};
 pub use block::strip_ansi;
-use table::{is_horizontal_rule, is_table_line, is_table_separator, parse_alignments, parse_table_cells, render_table, TBL_BODY, TBL_HEADER, TBL_NONE};
+use block::{header_style, inline_format, styled, truncate, visible_width, wordwrap};
+use table::{
+    is_horizontal_rule, is_table_line, is_table_separator, parse_alignments, parse_table_cells,
+    render_table, TBL_BODY, TBL_HEADER, TBL_NONE,
+};
 
-pub use theme::VESPER;
 pub use highlight::{highlight, highlight_code};
+pub use theme::VESPER;
 
 pub struct StreamRenderer {
     width: usize,
@@ -76,7 +79,11 @@ impl StreamRenderer {
             return format!("{}{}", prefix, formatted);
         }
         let prefix_width = visible_width(prefix);
-        let content_width = if self.width > prefix_width { self.width - prefix_width } else { 1 };
+        let content_width = if self.width > prefix_width {
+            self.width - prefix_width
+        } else {
+            1
+        };
         let wrapped = wordwrap(&formatted, content_width, "");
         let lines: Vec<&str> = wrapped.split('\n').collect();
         if lines.len() <= 1 {
@@ -97,13 +104,18 @@ impl StreamRenderer {
 
     fn render_bullet(&self, line: &str) -> String {
         let rest = line[1..].trim_start();
-        let bullet = styled(&line[..1], Some(&theme::VESPER.muted), false, false);
+        let bullet = styled(&line[..1], Some(theme::VESPER.muted), false, false);
 
-        if rest.starts_with("[ ] ") {
-            let check = styled("[ ]", Some(&theme::VESPER.muted), false, false);
-            self.wrap_list_item(&format!("{} {} ", bullet, check), &rest[4..])
+        if let Some(stripped) = rest.strip_prefix("[ ] ") {
+            let check = styled("[ ]", Some(theme::VESPER.muted), false, false);
+            self.wrap_list_item(&format!("{} {} ", bullet, check), stripped)
         } else if rest.starts_with("[x] ") || rest.starts_with("[X] ") {
-            let check = styled(&format!("[{}]", &rest[1..2]), Some(&theme::VESPER.string), false, false);
+            let check = styled(
+                &format!("[{}]", &rest[1..2]),
+                Some(theme::VESPER.string),
+                false,
+                false,
+            );
             self.wrap_list_item(&format!("{} {} ", bullet, check), &rest[4..])
         } else {
             self.wrap_list_item(&format!("{} ", bullet), rest)
@@ -112,7 +124,7 @@ impl StreamRenderer {
 
     fn render_nested_bullet(&self, line: &str, indent: usize) -> String {
         let trimmed = line.trim_start();
-        let bullet = styled(&trimmed[..1], Some(&theme::VESPER.muted), false, false);
+        let bullet = styled(&trimmed[..1], Some(theme::VESPER.muted), false, false);
         let rest = trimmed[1..].trim_start();
         let spaces = " ".repeat(indent);
         self.wrap_list_item(&format!("{}{} ", spaces, bullet), rest)
@@ -120,14 +132,14 @@ impl StreamRenderer {
 
     fn render_numbered(&self, line: &str) -> String {
         let dot = line.find('.').unwrap();
-        let num = styled(&line[..=dot], Some(&theme::VESPER.number), false, false);
+        let num = styled(&line[..=dot], Some(theme::VESPER.number), false, false);
         let rest = line[dot + 2..].trim_start();
         self.wrap_list_item(&format!("{} ", num), rest)
     }
 
     fn render_blockquote(&self, line: &str) -> String {
         let rest = line[1..].trim_start();
-        let marker = styled("|", Some(&theme::VESPER.muted), false, false);
+        let marker = styled("|", Some(theme::VESPER.muted), false, false);
         self.wrap_list_item(&format!("{} ", marker), rest)
     }
 
@@ -149,13 +161,14 @@ impl StreamRenderer {
             }
         };
 
-        let flush_table = |tbl_buf: &mut Vec<String>, tbl_state: &mut i32, out: &mut String, this: &Self| {
-            if !tbl_buf.is_empty() {
-                out.push_str(&this.format_table(tbl_buf, *tbl_state));
-                tbl_buf.clear();
-                *tbl_state = TBL_NONE;
-            }
-        };
+        let flush_table =
+            |tbl_buf: &mut Vec<String>, tbl_state: &mut i32, out: &mut String, this: &Self| {
+                if !tbl_buf.is_empty() {
+                    out.push_str(&this.format_table(tbl_buf, *tbl_state));
+                    tbl_buf.clear();
+                    *tbl_state = TBL_NONE;
+                }
+            };
 
         for line in &lines {
             if is_code_fence(line) {
@@ -193,7 +206,7 @@ impl StreamRenderer {
                 flush_table(&mut tbl_buf, &mut tbl_state, &mut out, self);
                 let rule = styled(
                     &"─".repeat(self.width),
-                    Some(&theme::VESPER.border),
+                    Some(theme::VESPER.border),
                     false,
                     false,
                 );
@@ -561,12 +574,21 @@ mod tests {
     #[test]
     fn test_render_bullet_wrapping() {
         let r = StreamRenderer::new(30);
-        let out = r.render("- this is a very long bullet point that should wrap to the next line properly");
+        let out = r.render(
+            "- this is a very long bullet point that should wrap to the next line properly",
+        );
         let ls = lines(&out);
-        assert!(ls.len() >= 2, "expected wrapping, got {} lines: {out}", ls.len());
+        assert!(
+            ls.len() >= 2,
+            "expected wrapping, got {} lines: {out}",
+            ls.len()
+        );
         if ls.len() >= 2 {
             let indent = strip_ansi_str(ls[1]);
-            assert!(indent.starts_with("  "), "continuation should be indented: {indent}");
+            assert!(
+                indent.starts_with("  "),
+                "continuation should be indented: {indent}"
+            );
         }
     }
 

@@ -2,11 +2,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 
-static RE_CODE_BLOCK: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
+static RE_CODE_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
 static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`[^`\n]+`").unwrap());
-static RE_TABLE_BLOCK: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?m)(^\|.+\|\s*$\n?)+").unwrap());
+static RE_TABLE_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)(^\|.+\|\s*$\n?)+").unwrap());
 static RE_TABLE_SEP: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\|[\s\-:|]+\|$").unwrap());
 static RE_HEADING: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^#{1,6}\s+(.+)$").unwrap());
 static RE_BOLD1: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
@@ -99,9 +97,9 @@ pub fn markdown_to_slack(text: &str) -> String {
             }
 
             for row in &mut rows {
-                for j in 0..row.len() {
-                    row[j] = RE_INLINE_CODE_PLACEHOLDER
-                        .replace_all(&row[j], |ph_caps: &regex::Captures| {
+                for cell in row.iter_mut() {
+                    *cell = RE_INLINE_CODE_PLACEHOLDER
+                        .replace_all(cell, |ph_caps: &regex::Captures| {
                             let ph = &ph_caps[0];
                             let idx = parse_placeholder_idx(ph, P_INLINE_CODE);
                             if idx >= 0 && (idx as usize) < inline_codes.len() {
@@ -112,8 +110,8 @@ pub fn markdown_to_slack(text: &str) -> String {
                             }
                         })
                         .to_string();
-                    row[j] = RE_BOLD1.replace_all(&row[j], "$1").to_string();
-                    row[j] = RE_BOLD2.replace_all(&row[j], "$1").to_string();
+                    *cell = RE_BOLD1.replace_all(cell, "$1").to_string();
+                    *cell = RE_BOLD2.replace_all(cell, "$1").to_string();
                 }
             }
 
@@ -168,29 +166,17 @@ pub fn markdown_to_slack(text: &str) -> String {
         })
         .to_string();
 
-    text = RE_ITALIC
-        .replace_all(&text, "_${1}_")
-        .to_string();
+    text = RE_ITALIC.replace_all(&text, "_${1}_").to_string();
 
-    text = RE_BOLD_PLACEHOLDER
-        .replace_all(&text, "*${1}*")
-        .to_string();
+    text = RE_BOLD_PLACEHOLDER.replace_all(&text, "*${1}*").to_string();
 
-    text = RE_STRIKE
-        .replace_all(&text, "~${1}~")
-        .to_string();
+    text = RE_STRIKE.replace_all(&text, "~${1}~").to_string();
 
-    text = RE_IMAGE
-        .replace_all(&text, "<${2}|${1}>")
-        .to_string();
+    text = RE_IMAGE.replace_all(&text, "<${2}|${1}>").to_string();
 
-    text = RE_LINK
-        .replace_all(&text, "<${2}|${1}>")
-        .to_string();
+    text = RE_LINK.replace_all(&text, "<${2}|${1}>").to_string();
 
-    text = RE_LIST
-        .replace_all(&text, "${1}\u{2022}  ")
-        .to_string();
+    text = RE_LIST.replace_all(&text, "${1}\u{2022}  ").to_string();
 
     text = RE_HR
         .replace_all(&text, "\u{2014}\u{2014}\u{2014}")
@@ -228,7 +214,7 @@ fn parse_placeholder_idx(s: &str, prefix: &str) -> isize {
     let s = s.strip_suffix(P_SUFFIX).unwrap_or(s);
     let mut n: isize = 0;
     for c in s.chars() {
-        if c < '0' || c > '9' {
+        if !c.is_ascii_digit() {
             return -1;
         }
         n = n * 10 + (c as isize - '0' as isize);
@@ -264,7 +250,10 @@ mod tests {
     #[test]
     fn test_strip_formatting_strikethrough() {
         let got = strip_formatting("hello ~~world~~ here");
-        assert!(got.contains("~~world~~"), "strikethrough is not stripped by strip_formatting");
+        assert!(
+            got.contains("~~world~~"),
+            "strikethrough is not stripped by strip_formatting"
+        );
     }
 
     #[test]
@@ -301,7 +290,10 @@ mod tests {
     fn test_markdown_to_slack_bold() {
         let got = markdown_to_slack("this is **bold** text");
         assert!(!got.contains("**"), "bold markers should be removed");
-        assert!(!got.contains("\u{00a7}BS\u{00a7}"), "bold placeholders should be resolved");
+        assert!(
+            !got.contains("\u{00a7}BS\u{00a7}"),
+            "bold placeholders should be resolved"
+        );
     }
 
     #[test]
@@ -313,12 +305,20 @@ mod tests {
     #[test]
     fn test_markdown_to_slack_code_block() {
         let got = markdown_to_slack("text\n```\ncode\n```\nmore");
-        assert!(got.contains("code"), "code content should be preserved: {}", got);
+        assert!(
+            got.contains("code"),
+            "code content should be preserved: {}",
+            got
+        );
     }
 
     #[test]
     fn test_markdown_to_slack_list() {
         let got = markdown_to_slack("- item one\n- item two");
-        assert!(got.contains("item one"), "list items should be preserved: {}", got);
+        assert!(
+            got.contains("item one"),
+            "list items should be preserved: {}",
+            got
+        );
     }
 }

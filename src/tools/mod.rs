@@ -17,11 +17,13 @@ pub struct Tool {
     pub name: String,
     pub description: String,
     pub parameters: HashMap<String, Value>,
+    #[allow(clippy::type_complexity)]
     pub execute: Arc<
         dyn Fn(
                 Value,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>
-            + Send
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<String, String>> + Send>,
+            > + Send
             + Sync,
     >,
 }
@@ -75,11 +77,25 @@ impl Registry {
     }
 }
 
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 static CATALOG: once_cell::sync::OnceCell<std::sync::Mutex<HashMap<String, Tool>>> =
     once_cell::sync::OnceCell::new();
 
 fn catalog() -> &'static std::sync::Mutex<HashMap<String, Tool>> {
-    CATALOG.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+    CATALOG.get_or_init(|| {
+        let mut map = HashMap::new();
+        for t in standard() {
+            map.insert(t.name.clone(), t);
+        }
+        let wf = webfetch::tool();
+        map.insert(wf.name.clone(), wf);
+        std::sync::Mutex::new(map)
+    })
 }
 
 pub fn register(name: &str, tool: Tool) {
@@ -135,9 +151,8 @@ where
                 let name = name.clone();
                 let f = f.clone();
                 Box::pin(async move {
-                    let p = result.map_err(|e| {
-                        format!("invalid parameters for tool {}: {}", name, e)
-                    })?;
+                    let p = result
+                        .map_err(|e| format!("invalid parameters for tool {}: {}", name, e))?;
                     f(p).await
                 })
             },
@@ -240,10 +255,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("type".to_string(), serde_json::json!("object"));
         let mut props = HashMap::new();
-        props.insert(
-            "command".to_string(),
-            serde_json::json!({"type": "string"}),
-        );
+        props.insert("command".to_string(), serde_json::json!({"type": "string"}));
         params.insert("properties".to_string(), serde_json::json!(props));
 
         let tool = Tool {
@@ -270,7 +282,14 @@ mod tests {
         let tools = standard();
         assert_eq!(tools.len(), 6);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        for n in &["bash", "read_file", "write_file", "edit_file", "grep", "glob"] {
+        for n in &[
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "grep",
+            "glob",
+        ] {
             assert!(names.contains(n), "missing {}", n);
         }
     }
@@ -284,9 +303,12 @@ mod tests {
 
     #[test]
     fn test_define_tool_valid_params() {
-        let tool = define_tool("greet", "says hello", HashMap::new(), |p: GreetParams| async move {
-            Ok(format!("hello {}", p.name))
-        });
+        let tool = define_tool(
+            "greet",
+            "says hello",
+            HashMap::new(),
+            |p: GreetParams| async move { Ok(format!("hello {}", p.name)) },
+        );
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on((tool.execute)(
@@ -297,14 +319,15 @@ mod tests {
 
     #[test]
     fn test_define_tool_invalid_params() {
-        let tool = define_tool("greet", "says hello", HashMap::new(), |p: GreetParams| async move {
-            Ok(format!("hello {}", p.name))
-        });
+        let tool = define_tool(
+            "greet",
+            "says hello",
+            HashMap::new(),
+            |p: GreetParams| async move { Ok(format!("hello {}", p.name)) },
+        );
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on((tool.execute)(
-            serde_json::json!({}),
-        ));
+        let result = rt.block_on((tool.execute)(serde_json::json!({})));
         assert!(result.is_err());
     }
 
@@ -315,14 +338,15 @@ mod tests {
 
     #[test]
     fn test_define_tool_context_propagation() {
-        let tool = define_tool("ctx", "test", HashMap::new(), |p: ContextParams| async move {
-            Ok(format!("got: {}", p.val))
-        });
+        let tool = define_tool(
+            "ctx",
+            "test",
+            HashMap::new(),
+            |p: ContextParams| async move { Ok(format!("got: {}", p.val)) },
+        );
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on((tool.execute)(
-            serde_json::json!({"val": "x"}),
-        ));
+        let result = rt.block_on((tool.execute)(serde_json::json!({"val": "x"})));
         assert_eq!(result.unwrap(), "got: x");
     }
 
@@ -354,5 +378,26 @@ mod tests {
     fn test_catalog_names() {
         let names = catalog_names();
         assert!(names.contains(&"cat_test".to_string()));
+    }
+
+    #[test]
+    fn test_standard_tools_in_catalog() {
+        let names = catalog_names();
+        for n in &[
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "grep",
+            "glob",
+            "web_fetch",
+        ] {
+            assert!(
+                names.contains(&n.to_string()),
+                "standard tool {:?} missing from catalog: {:?}",
+                n,
+                names
+            );
+        }
     }
 }

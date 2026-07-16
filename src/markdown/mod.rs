@@ -4,8 +4,7 @@ pub mod telegram;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-static RE_CODE_BLOCK_GLOBAL: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
+static RE_CODE_BLOCK_GLOBAL: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
 
 struct CodeRange {
     start: usize,
@@ -40,11 +39,8 @@ pub fn split_text(text: &str, max_len: usize) -> Vec<String> {
 
     let block_ranges = find_code_block_ranges(text);
 
-    let is_inside = |idx: usize| -> bool {
-        block_ranges
-            .iter()
-            .any(|r| idx > r.start && idx < r.end)
-    };
+    let is_inside =
+        |idx: usize| -> bool { block_ranges.iter().any(|r| idx > r.start && idx < r.end) };
 
     let mut chunks: Vec<String> = Vec::new();
     let mut pos = 0;
