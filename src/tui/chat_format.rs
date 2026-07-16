@@ -8,17 +8,20 @@ pub fn format_tokens(n: i32) -> String {
     }
 }
 
-pub fn tool_color(name: &str) -> &'static str {
+pub const TOOL_COLOR: &str = crate::render::theme::VESPER.accent;
+
+pub fn tool_pretty_name(name: &str) -> &str {
     match name {
-        "read_file" | "grep" | "glob" => "#73daca",
-        "write_file" | "edit_file" | "bash" => "#e0af68",
-        _ => "#bb9af7",
+        "read_file" => "read",
+        "write_file" => "write",
+        "edit_file" => "edit",
+        _ => name,
     }
 }
 
 pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
     if args.is_empty() {
-        return name.to_string();
+        return tool_pretty_name(name).to_string();
     }
     match name {
         "read_file" => {
@@ -34,9 +37,9 @@ pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
                         } else {
                             String::new()
                         };
-                        return format!("{}({} L{}{})", name, label, offset, end);
+                        return format!("read {} L{}{}", label, offset, end);
                     }
-                    return format!("{}({})", name, label);
+                    return format!("read {}", label);
                 }
             }
         }
@@ -45,7 +48,7 @@ pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
                 let path = p["path"].as_str().unwrap_or("");
                 let content = p["content"].as_str().unwrap_or("");
                 if !path.is_empty() {
-                    return format!("{}({}, {}B)", name, rel_path(cwd, path), content.len());
+                    return format!("write {} {}B", rel_path(cwd, path), content.len());
                 }
             }
         }
@@ -54,7 +57,8 @@ pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
                 let path = p["path"].as_str().unwrap_or("");
                 let edits = p["edits"].as_array().map(|a| a.len()).unwrap_or(0);
                 if !path.is_empty() {
-                    return format!("{}({}, {} edits)", name, rel_path(cwd, path), edits);
+                    let unit = if edits == 1 { "edit" } else { "edits" };
+                    return format!("edit {} {} {}", rel_path(cwd, path), edits, unit);
                 }
             }
         }
@@ -62,7 +66,7 @@ pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
             if let Ok(p) = serde_json::from_str::<serde_json::Value>(args) {
                 let cmd = p["command"].as_str().unwrap_or("");
                 if !cmd.is_empty() {
-                    return format!("{}({})", name, cmd);
+                    return cmd.to_string();
                 }
             }
         }
@@ -80,13 +84,13 @@ pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
                         };
                         label = format!("{}: {}", label, t);
                     }
-                    return format!("{}({})", name, label);
+                    return label;
                 }
             }
         }
         _ => {}
     }
-    format!("{}({})", name, args)
+    format!("{} {}", tool_pretty_name(name), args)
 }
 
 fn rel_path(cwd: &str, path: &str) -> String {
@@ -151,13 +155,22 @@ mod tests {
             "read_file",
             r#"{"path":"/home/user/project/src/main.rs","offset":10,"limit":5}"#,
         );
-        assert!(label.contains("src/main.rs"));
-        assert!(label.contains("L10-14"));
+        assert_eq!(label, "read src/main.rs L10-14");
     }
 
     #[test]
     fn test_format_tool_label_bash() {
         let label = format_tool_label("/home/user", "bash", r#"{"command":"ls -la"}"#);
-        assert!(label.contains("ls -la"));
+        assert_eq!(label, "ls -la");
+    }
+
+    #[test]
+    fn test_format_tool_label_edit_file() {
+        let label = format_tool_label(
+            "/home/user/project",
+            "edit_file",
+            r#"{"path":"/home/user/project/src/main.rs","edits":[{},{}]}"#,
+        );
+        assert_eq!(label, "edit src/main.rs 2 edits");
     }
 }

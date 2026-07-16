@@ -4,19 +4,21 @@ use crate::prompts::Template;
 use crate::render::StreamRenderer;
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Style},
+    style::{Style},
     text::{Line, Text},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::chat_dropdowns::{
-    render_command_dropdown, render_file_dropdown, render_template_dropdown, Dropdown, COMMANDS,
+    fuzzy_score, render_command_dropdown, render_file_dropdown, render_template_dropdown, Dropdown,
+    COMMANDS,
 };
 use super::chat_handlers::{finish_bot_message, handle_agent_event, ChatMsg, LiveBlock, Segment};
 use super::chat_render::{render_tool_block, thinking_indicator};
 use super::file_picker::index_files;
+use super::theme::COLORS;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Modal {
@@ -53,6 +55,8 @@ pub struct ChatScreen {
     pub history_idx: isize,
     pub textarea_height: u16,
     pub textarea_scroll: usize,
+    pub blink_at: Instant,
+    pub blink_on: bool,
 
     pub viewport_offset: usize,
     pub viewport_lines: Vec<String>,
@@ -117,6 +121,8 @@ impl ChatScreen {
             history_idx: -1,
             textarea_height: 1,
             textarea_scroll: 0,
+            blink_at: Instant::now(),
+            blink_on: true,
 
             viewport_offset: 0,
             viewport_lines: Vec::new(),
@@ -260,17 +266,17 @@ impl ChatScreen {
 
                             if name == "delegate" && !id.is_empty() {
                                 if let Some(child_msgs) = children.get(&id) {
-                                    let subagent = parse_subagent_from_args(&args);
+                                    let delegate_seg = last.segments.last_mut().unwrap();
                                     for child_msg in child_msgs {
                                         if child_msg.role == crate::message::Role::Tool {
-                                            last.segments.push(Segment::tool(
+                                            delegate_seg.children.push(Segment::tool(
                                                 &child_msg.name,
                                                 "",
                                                 &child_msg.content,
                                                 "",
                                                 &child_msg.tool_duration,
                                                 &self.cwd,
-                                                &subagent,
+                                                "",
                                             ));
                                         }
                                     }
@@ -287,6 +293,10 @@ impl ChatScreen {
 
     pub fn render(&mut self, f: &mut Frame) {
         let area = f.area();
+        if self.blink_at.elapsed() >= Duration::from_millis(500) {
+            self.blink_on = !self.blink_on;
+            self.blink_at = Instant::now();
+        }
         if area.width != self.width || area.height != self.height {
             self.set_size(area.width, area.height);
         }
@@ -365,19 +375,26 @@ impl ChatScreen {
                 let text_fg = "\x1b[38;2;225;225;225m";
                 let reset = "\x1b[0m";
                 let w = (self.width as usize).saturating_sub(5).max(20);
-                let content = crate::render::block::wordwrap(msg.content.trim(), w, "");
                 let mut lines = Vec::new();
-                for (i, line) in content.lines().enumerate() {
-                    if i == 0 {
-                        lines.push(format!("{user_accent}❯{reset} {text_fg}{line}{reset}"));
-                    } else {
-                        lines.push(format!("  {text_fg}{line}{reset}"));
+                let mut first = true;
+                for raw in msg.content.trim().split('\n') {
+                    for line in crate::render::block::wordwrap(raw, w, "").lines() {
+                        if first {
+                            lines.push(format!("{user_accent}❯{reset} {text_fg}{line}{reset}"));
+                            first = false;
+                        } else {
+                            lines.push(format!("  {text_fg}{line}{reset}"));
+                        }
                     }
                 }
                 lines.join("\n")
             }
             "assistant" => self.render_assistant_turn(msg),
-            "error" => msg.content.clone(),
+            "error" => {
+                let red = "\x1b[38;2;247;118;142m";
+                let reset = "\x1b[0m";
+                format!("{red}{}{reset}", msg.content)
+            }
             _ => String::new(),
         }
     }
@@ -408,18 +425,46 @@ impl ChatScreen {
                     }
                 }
                 "prose" => self.renderer.render(&seg.content),
-                "tool" => render_tool_block(
-                    &seg.tool_name,
-                    &seg.tool_args,
-                    &seg.tool_result,
-                    &seg.tool_error,
-                    &seg.tool_duration,
-                    &self.cwd,
-                    &seg.tool_subagent,
-                    !self.tools_expanded,
-                    (self.width as usize).saturating_sub(3),
-                    0,
-                ),
+                "tool" => {
+                    let collapsed = !self.tools_expanded;
+                    let width = (self.width as usize).saturating_sub(3);
+                    let mut out = render_tool_block(
+                        &seg.tool_name,
+                        &seg.tool_args,
+                        &seg.tool_result,
+                        &seg.tool_error,
+                        &seg.tool_duration,
+                        &self.cwd,
+                        &seg.tool_subagent,
+                        collapsed,
+                        width,
+                        0,
+                    );
+                    if !seg.children.is_empty() {
+                        if collapsed {
+                            let n = seg.children.len();
+                            let unit = if n == 1 { "call" } else { "calls" };
+                            out.push_str(&format!(" ({} {})", n, unit));
+                        } else {
+                            for child in &seg.children {
+                                out.push('\n');
+                                out.push_str(&render_tool_block(
+                                    &child.tool_name,
+                                    &child.tool_args,
+                                    &child.tool_result,
+                                    &child.tool_error,
+                                    &child.tool_duration,
+                                    &self.cwd,
+                                    "",
+                                    false,
+                                    width,
+                                    2,
+                                ));
+                            }
+                        }
+                    }
+                    out
+                }
                 _ => continue,
             };
             if !content.is_empty() {
@@ -454,18 +499,46 @@ impl ChatScreen {
                     );
                     out
                 }
-                "tool" => render_tool_block(
-                    &lb.tool_name,
-                    &lb.tool_args,
-                    &lb.tool_result,
-                    &lb.tool_error,
-                    &lb.tool_duration,
-                    &self.cwd,
-                    &lb.tool_subagent,
-                    !self.tools_expanded,
-                    (self.width as usize).saturating_sub(3),
-                    0,
-                ),
+                "tool" => {
+                    let collapsed = !self.tools_expanded;
+                    let width = (self.width as usize).saturating_sub(3);
+                    let mut out = render_tool_block(
+                        &lb.tool_name,
+                        &lb.tool_args,
+                        &lb.tool_result,
+                        &lb.tool_error,
+                        &lb.tool_duration,
+                        &self.cwd,
+                        &lb.tool_subagent,
+                        collapsed,
+                        width,
+                        0,
+                    );
+                    if !lb.children.is_empty() {
+                        if collapsed {
+                            let n = lb.children.len();
+                            let unit = if n == 1 { "call" } else { "calls" };
+                            out.push_str(&format!(" ({} {})", n, unit));
+                        } else {
+                            for child in &lb.children {
+                                out.push('\n');
+                                out.push_str(&render_tool_block(
+                                    &child.tool_name,
+                                    &child.tool_args,
+                                    &child.tool_result,
+                                    &child.tool_error,
+                                    &child.tool_duration,
+                                    &self.cwd,
+                                    "",
+                                    false,
+                                    width,
+                                    2,
+                                ));
+                            }
+                        }
+                    }
+                    out
+                }
                 _ => continue,
             };
             if !content.is_empty() {
@@ -530,7 +603,12 @@ impl ChatScreen {
             let h = 8u16;
             let top = bottom_area.y + y_offset;
             if let Some(h2) = fit_height(area, top, h) {
-                let modal_area = Rect::new(bottom_area.x, top, bottom_area.width.min(60), h2);
+                let modal_area = Rect::new(
+                    bottom_area.x + 1,
+                    top,
+                    bottom_area.width.saturating_sub(2),
+                    h2,
+                );
                 render_template_dropdown(f, modal_area, &self.template_dropdown, "");
             }
             y_offset += h;
@@ -539,7 +617,12 @@ impl ChatScreen {
             let h = 11u16;
             let top = bottom_area.y + y_offset;
             if let Some(h2) = fit_height(area, top, h) {
-                let modal_area = Rect::new(bottom_area.x, top, bottom_area.width.min(60), h2);
+                let modal_area = Rect::new(
+                    bottom_area.x + 1,
+                    top,
+                    bottom_area.width.saturating_sub(2),
+                    h2,
+                );
                 render_file_dropdown(f, modal_area, &self.file_dropdown);
             }
             y_offset += h;
@@ -548,7 +631,12 @@ impl ChatScreen {
             let h = (COMMANDS.len() + 3) as u16;
             let top = bottom_area.y + y_offset;
             if let Some(h2) = fit_height(area, top, h) {
-                let modal_area = Rect::new(bottom_area.x, top, bottom_area.width.min(40), h2);
+                let modal_area = Rect::new(
+                    bottom_area.x + 1,
+                    top,
+                    bottom_area.width.saturating_sub(2),
+                    h2,
+                );
                 render_command_dropdown(f, modal_area, &self.command_dropdown);
             }
             y_offset += h;
@@ -563,7 +651,12 @@ impl ChatScreen {
             let indicator = thinking_indicator(self.wait_ticks, label, self.wait_start.elapsed());
             let top = bottom_area.y + y_offset;
             if fit_height(area, top, 1).is_some() {
-                let thinking_area = Rect::new(bottom_area.x, top, bottom_area.width, 1);
+                let thinking_area = Rect::new(
+                    bottom_area.x + 1,
+                    top,
+                    bottom_area.width.saturating_sub(2),
+                    1,
+                );
                 f.render_widget(
                     Paragraph::new(indicator).alignment(Alignment::Left),
                     thinking_area,
@@ -578,15 +671,15 @@ impl ChatScreen {
                 &self.textarea
             };
             let input_color = if self.textarea.is_empty() {
-                Color::from_u32(0x006C6C6C)
+                COLORS.placeholder
             } else {
-                Color::from_u32(0x00E1E1E1)
+                COLORS.fg
             };
 
             let branch_or_cwd = crate::tui::chat_render::git_branch(&self.cwd)
                 .unwrap_or_else(|| shorten_cwd_string(&self.cwd));
-            let border_color = Color::from_u32(0x00505058);
-            let dim = Style::default().fg(Color::from_u32(0x006C6C6C));
+            let border_color = COLORS.border;
+            let dim = Style::default().fg(COLORS.placeholder);
 
             let mut parts = vec![format!(
                 "{} / {}",
@@ -625,13 +718,15 @@ impl ChatScreen {
                             .scroll((self.textarea_scroll as u16, 0)),
                         content_area,
                     );
-                    let (crow, ccol) =
-                        textarea_cursor_xy(&self.textarea, self.cursor, content_area.width);
-                    let display_row = crow.saturating_sub(self.textarea_scroll as u16);
-                    let cx = content_area.x + ccol.min(content_area.width);
-                    let cy =
-                        content_area.y + display_row.min(content_area.height.saturating_sub(1));
-                    f.set_cursor_position((cx, cy));
+                    if self.blink_on {
+                        let (crow, ccol) =
+                            textarea_cursor_xy(&self.textarea, self.cursor, content_area.width);
+                        let display_row = crow.saturating_sub(self.textarea_scroll as u16);
+                        let cx = content_area.x + ccol.min(content_area.width);
+                        let cy =
+                            content_area.y + display_row.min(content_area.height.saturating_sub(1));
+                        f.set_cursor_position((cx, cy));
+                    }
                 }
             }
         }
@@ -698,16 +793,17 @@ impl ChatScreen {
     }
 
     pub fn filter_template_dropdown(&mut self, query: &str) {
-        if query.is_empty() {
+        let q = query.rsplit_once('/').map(|(_, a)| a).unwrap_or(query);
+        if q.is_empty() {
             self.template_dropdown.items = self.all_template_items.clone();
         } else {
-            let lower = query.to_lowercase();
-            self.template_dropdown.items = self
+            let mut scored: Vec<(i64, (Template, String))> = self
                 .all_template_items
                 .iter()
-                .filter(|(t, _)| t.name.to_lowercase().contains(&lower))
-                .cloned()
+                .filter_map(|t| fuzzy_score(q, &t.0.name).map(|s| (s, t.clone())))
                 .collect();
+            scored.sort_by_key(|b| std::cmp::Reverse(b.0));
+            self.template_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
         }
         if self.template_dropdown.selected >= self.template_dropdown.items.len() {
             self.template_dropdown.selected = self.template_dropdown.items.len().saturating_sub(1);
@@ -722,16 +818,17 @@ impl ChatScreen {
 
     pub fn filter_file_dropdown(&mut self, query: &str) {
         self.ensure_files_loaded();
+        let q = query.rsplit_once('@').map(|(_, a)| a).unwrap_or(query);
         let all = self.all_files.clone();
-        if query.is_empty() {
+        if q.is_empty() {
             self.file_dropdown.items = all.into_iter().map(|f| (f.clone(), f)).collect();
         } else {
-            let lower = query.to_lowercase();
-            self.file_dropdown.items = all
+            let mut scored: Vec<(i64, (String, String))> = all
                 .into_iter()
-                .filter(|f| f.to_lowercase().contains(&lower))
-                .map(|f| (f.clone(), f))
+                .filter_map(|f| fuzzy_score(q, &f).map(|s| (s, (f.clone(), f))))
                 .collect();
+            scored.sort_by_key(|b| std::cmp::Reverse(b.0));
+            self.file_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
         }
         if self.file_dropdown.selected >= self.file_dropdown.items.len() {
             self.file_dropdown.selected = self.file_dropdown.items.len().saturating_sub(1);
@@ -948,7 +1045,7 @@ impl ChatScreen {
 
     pub fn insert_char(&mut self, c: char) {
         self.textarea.insert(self.cursor, c);
-        self.cursor += 1;
+        self.cursor += c.len_utf8();
     }
 
     pub fn insert_str(&mut self, s: &str) {
@@ -958,20 +1055,35 @@ impl ChatScreen {
 
     pub fn delete_before_cursor(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            let prev = self.textarea[..self.cursor]
+                .chars()
+                .next_back()
+                .unwrap()
+                .len_utf8();
+            self.cursor -= prev;
             self.textarea.remove(self.cursor);
         }
     }
 
     pub fn cursor_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            let prev = self.textarea[..self.cursor]
+                .chars()
+                .next_back()
+                .unwrap()
+                .len_utf8();
+            self.cursor -= prev;
         }
     }
 
     pub fn cursor_right(&mut self) {
         if self.cursor < self.textarea.len() {
-            self.cursor += 1;
+            let next = self.textarea[self.cursor..]
+                .chars()
+                .next()
+                .unwrap()
+                .len_utf8();
+            self.cursor += next;
         }
     }
 
@@ -987,13 +1099,89 @@ impl ChatScreen {
         self.textarea = text.to_string();
         self.cursor = self.textarea.len();
     }
-}
 
-fn parse_subagent_from_args(args: &str) -> String {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(args) {
-        v["subagent"].as_str().unwrap_or("").to_string()
-    } else {
-        String::new()
+    pub fn cursor_up(&mut self) -> bool {
+        let (line, col) = self.locate();
+        if line == 0 {
+            return false;
+        }
+        self.move_to(line - 1, col);
+        true
+    }
+
+    pub fn cursor_down(&mut self) -> bool {
+        let (line, col) = self.locate();
+        if line >= self.textarea.matches('\n').count() {
+            return false;
+        }
+        self.move_to(line + 1, col);
+        true
+    }
+
+    pub fn cursor_left_word(&mut self) {
+        let chars: Vec<(usize, char)> = self.textarea.char_indices().collect();
+        let mut idx = chars
+            .iter()
+            .position(|(b, _)| *b >= self.cursor)
+            .unwrap_or(chars.len());
+        while idx > 0 && chars[idx - 1].1.is_whitespace() {
+            idx -= 1;
+        }
+        while idx > 0 && !chars[idx - 1].1.is_whitespace() {
+            idx -= 1;
+        }
+        self.cursor = if idx > 0 { chars[idx].0 } else { 0 };
+    }
+
+    pub fn cursor_right_word(&mut self) {
+        let chars: Vec<(usize, char)> = self.textarea.char_indices().collect();
+        let n = chars.len();
+        let mut idx = chars
+            .iter()
+            .position(|(b, _)| *b >= self.cursor)
+            .unwrap_or(n);
+        while idx < n && chars[idx].1.is_whitespace() {
+            idx += 1;
+        }
+        while idx < n && !chars[idx].1.is_whitespace() {
+            idx += 1;
+        }
+        self.cursor = if idx < n {
+            chars[idx].0
+        } else {
+            self.textarea.len()
+        };
+    }
+
+    fn locate(&self) -> (usize, usize) {
+        let mut line = 0;
+        let mut byte = 0;
+        for l in self.textarea.split('\n') {
+            let end = byte + l.len();
+            if self.cursor <= end {
+                let col = self.textarea[byte..self.cursor].chars().count();
+                return (line, col);
+            }
+            byte = end + 1;
+            line += 1;
+        }
+        (line.saturating_sub(1), 0)
+    }
+
+    fn move_to(&mut self, line_idx: usize, char_col: usize) {
+        let mut byte = 0;
+        for (line, l) in self.textarea.split('\n').enumerate() {
+            if line == line_idx {
+                let mut target = byte;
+                for c in l.chars().take(char_col) {
+                    target += c.len_utf8();
+                }
+                self.cursor = target;
+                return;
+            }
+            byte += l.len() + 1;
+        }
+        self.cursor = self.textarea.len();
     }
 }
 
@@ -1388,5 +1576,103 @@ mod tests {
         render_to(&mut s, 80, 24);
         assert!(s.user_scrolled_up);
         assert_eq!(s.viewport_offset, pinned);
+    }
+
+    #[test]
+    fn multibyte_char_keeps_cursor_on_boundary() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_size(80, 24);
+        // '▸' is 3 bytes; inserting it must not land the cursor mid-char
+        s.insert_char('▸');
+        assert!(s.textarea.is_char_boundary(s.cursor));
+        assert_eq!(s.cursor, 3);
+        // must not panic
+        s.update_textarea_layout();
+        let _ = textarea_cursor_xy(&s.textarea, s.cursor, 76);
+
+        // left/right move by one char (3 bytes), not one byte
+        s.cursor_left();
+        assert_eq!(s.cursor, 0);
+        s.cursor_right();
+        assert_eq!(s.cursor, 3);
+
+        // backspace removes the whole char
+        s.delete_before_cursor();
+        assert_eq!(s.textarea, "");
+        assert_eq!(s.cursor, 0);
+    }
+
+    #[test]
+    fn cursor_up_down_moves_between_lines() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("hello world\nfoo\nbar");
+        s.cursor_end();
+        assert_eq!(s.cursor, s.textarea.len());
+        assert!(s.cursor_up());
+        assert_eq!(&s.textarea[s.cursor..], "\nbar");
+        let line1_start = s.cursor;
+        assert!(s.cursor_up());
+        assert!(s.cursor < line1_start);
+        assert!(s.cursor_down());
+        assert_eq!(s.cursor, line1_start);
+    }
+
+    #[test]
+    fn cursor_up_returns_false_on_first_line() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("abc\ndef");
+        s.cursor_home();
+        assert!(!s.cursor_up());
+    }
+
+    #[test]
+    fn cursor_down_returns_false_on_last_line() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("abc\ndef");
+        s.cursor_end();
+        assert!(!s.cursor_down());
+    }
+
+    #[test]
+    fn cursor_up_down_clamps_short_line() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("hello world\nab");
+        s.cursor_home();
+        for _ in 0..5 {
+            s.cursor_right();
+        }
+        assert_eq!(s.cursor, 5);
+        assert!(s.cursor_down());
+        // "ab" has only 2 chars, so the column clamps to the line end
+        assert_eq!(s.cursor, s.textarea.len());
+        assert!(s.cursor_up());
+        // column is not sticky: up uses the current (clamped) column
+        assert_eq!(s.cursor, 2);
+    }
+
+    #[test]
+    fn word_jump_skips_words() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("hello world foo");
+        s.cursor_home();
+        s.cursor_right_word();
+        assert_eq!(s.cursor, 5); // after "hello", on space
+        s.cursor_right_word();
+        assert_eq!(s.cursor, 11); // after "world"
+        s.cursor_right_word();
+        assert_eq!(s.cursor, s.textarea.len());
+    }
+
+    #[test]
+    fn word_jump_left() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("hello world foo");
+        s.cursor_end();
+        s.cursor_left_word();
+        assert_eq!(s.cursor, 12); // start of "foo"
+        s.cursor_left_word();
+        assert_eq!(s.cursor, 6); // start of "world"
+        s.cursor_left_word();
+        assert_eq!(s.cursor, 0);
     }
 }

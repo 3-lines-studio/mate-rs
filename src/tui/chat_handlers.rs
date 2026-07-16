@@ -14,6 +14,7 @@ pub struct LiveBlock {
     pub tool_error: String,
     pub tool_duration: String,
     pub tool_subagent: String,
+    pub children: Vec<LiveBlock>,
 }
 
 impl LiveBlock {
@@ -29,6 +30,7 @@ impl LiveBlock {
             tool_error: String::new(),
             tool_duration: String::new(),
             tool_subagent: String::new(),
+            children: Vec::new(),
         }
     }
 }
@@ -44,6 +46,7 @@ pub struct Segment {
     pub tool_error: String,
     pub tool_duration: String,
     pub tool_subagent: String,
+    pub children: Vec<Segment>,
 }
 
 impl Segment {
@@ -58,6 +61,7 @@ impl Segment {
             tool_error: String::new(),
             tool_duration: String::new(),
             tool_subagent: String::new(),
+            children: Vec::new(),
         }
     }
 
@@ -72,6 +76,7 @@ impl Segment {
             tool_error: String::new(),
             tool_duration: String::new(),
             tool_subagent: String::new(),
+            children: Vec::new(),
         }
     }
 
@@ -94,6 +99,7 @@ impl Segment {
             tool_error: error.into(),
             tool_duration: duration.into(),
             tool_subagent: subagent.into(),
+            children: Vec::new(),
         }
     }
 }
@@ -162,7 +168,7 @@ pub fn handle_agent_event(
             lb.rendered.clear();
         }
         "tool_call_start" => {
-            live_blocks.push(LiveBlock {
+            let block = LiveBlock {
                 kind: "tool".into(),
                 raw: String::new(),
                 rendered: String::new(),
@@ -172,27 +178,31 @@ pub fn handle_agent_event(
                 tool_result: String::new(),
                 tool_error: String::new(),
                 tool_duration: String::new(),
-                tool_subagent: event.subagent.clone(),
-            });
+                tool_subagent: String::new(),
+                children: Vec::new(),
+            };
+            if !event.subagent_id.is_empty() {
+                if let Some(parent) = find_block_mut(live_blocks, &event.subagent_id) {
+                    parent.children.push(block);
+                } else {
+                    live_blocks.push(block);
+                }
+            } else {
+                live_blocks.push(block);
+            }
         }
         "tool_result" => {
-            for lb in live_blocks.iter_mut().rev() {
-                if lb.kind == "tool" && lb.tool_id == event.tool_call_id {
-                    lb.tool_result = event.tool_result.clone();
-                    lb.tool_duration = event.tool_duration.clone();
-                    lb.rendered.clear();
-                    break;
-                }
+            if let Some(lb) = find_block_mut(live_blocks, &event.tool_call_id) {
+                lb.tool_result = event.tool_result.clone();
+                lb.tool_duration = event.tool_duration.clone();
+                lb.rendered.clear();
             }
         }
         "tool_error" => {
-            for lb in live_blocks.iter_mut().rev() {
-                if lb.kind == "tool" && lb.tool_id == event.tool_call_id {
-                    lb.tool_error = event.tool_error.clone();
-                    lb.tool_duration = event.tool_duration.clone();
-                    lb.rendered.clear();
-                    break;
-                }
+            if let Some(lb) = find_block_mut(live_blocks, &event.tool_call_id) {
+                lb.tool_error = event.tool_error.clone();
+                lb.tool_duration = event.tool_duration.clone();
+                lb.rendered.clear();
             }
         }
         "agent_done" => {
@@ -227,12 +237,23 @@ pub fn handle_agent_event(
                 *cache_hit_tokens = usage.prompt_cache_hit_tokens;
             }
             if let Some(asession) = active_session {
-                *total_tokens = asession.context_tokens();
                 *total_cost = asession.sess().cost;
             }
         }
         _ => {}
     }
+}
+
+fn find_block_mut<'a>(blocks: &'a mut [LiveBlock], tool_id: &str) -> Option<&'a mut LiveBlock> {
+    for lb in blocks.iter_mut().rev() {
+        if lb.tool_id == tool_id {
+            return Some(lb);
+        }
+        if let Some(c) = find_block_mut(&mut lb.children, tool_id) {
+            return Some(c);
+        }
+    }
+    None
 }
 
 fn ensure_block<'a>(blocks: &'a mut Vec<LiveBlock>, kind: &str) -> &'a mut LiveBlock {

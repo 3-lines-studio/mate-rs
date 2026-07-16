@@ -37,9 +37,30 @@ pub fn match_inline(text: &str, i: usize, check_boundaries: bool) -> Option<Inli
     let bytes = text.as_bytes();
 
     if bytes[i] == b'`' {
-        if let Some(idx) = text[i + 1..].find('`') {
-            let end = i + idx + 2;
-            let inner = &text[i..end];
+        let mut n = 1;
+        while i + n < bytes.len() && bytes[i + n] == b'`' {
+            n += 1;
+        }
+        let mut j = i + n;
+        let mut close = None;
+        while j < bytes.len() {
+            if bytes[j] != b'`' {
+                j += 1;
+                continue;
+            }
+            let mut m = 1;
+            while j + m < bytes.len() && bytes[j + m] == b'`' {
+                m += 1;
+            }
+            if m == n {
+                close = Some(j);
+                break;
+            }
+            j += m;
+        }
+        if let Some(close) = close {
+            let end = close + n;
+            let inner = &text[i + n..close];
             if check_boundaries
                 && (!is_boundary(text, i as isize - 1) || !is_boundary(text, end as isize))
             {
@@ -187,12 +208,9 @@ pub fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
 
 pub fn render_inline(kind: InlineKind, inner: &str) -> String {
     match kind {
-        InlineKind::Code => {
-            let inner = ansi_style(inner, Some(VESPER.string), false, false, false, false);
-            format!("`{}`", inner)
-        }
-        InlineKind::BoldItalic => ansi_style(inner, None, true, true, false, false),
-        InlineKind::Bold => ansi_style(inner, None, true, false, false, false),
+        InlineKind::Code => ansi_style(inner, Some(VESPER.string), false, false, false, false),
+        InlineKind::BoldItalic => ansi_style(inner, Some(VESPER.fg), true, true, false, false),
+        InlineKind::Bold => ansi_style(inner, Some(VESPER.fg), true, false, false, false),
         InlineKind::Italic => ansi_style(inner, None, false, true, false, false),
         InlineKind::Strike => ansi_style(inner, Some(VESPER.muted), false, false, true, false),
         InlineKind::Link => ansi_style(inner, Some(VESPER.accent), false, false, false, true),
@@ -535,6 +553,28 @@ mod tests {
         let out = inline_format("use `fmt.Println()` to print");
         let plain = strip_ansi(&out);
         assert!(plain.contains("fmt.Println()"));
+    }
+
+    #[test]
+    fn test_inline_format_code_double_backtick() {
+        let out = inline_format("use ``fmt.Println()`` to print");
+        let plain = strip_ansi(&out);
+        assert!(plain.contains("fmt.Println()"));
+        assert!(!plain.contains("``"));
+    }
+
+    #[test]
+    fn test_inline_format_code_double_containing_single() {
+        let out = inline_format("a `` `x` `` b");
+        let plain = strip_ansi(&out);
+        assert_eq!(plain, "a  `x`  b");
+    }
+
+    #[test]
+    fn test_inline_format_code_unmatched_double_backtick() {
+        let out = inline_format("a `` b");
+        let plain = strip_ansi(&out);
+        assert_eq!(plain, "a `` b");
     }
 
     #[test]

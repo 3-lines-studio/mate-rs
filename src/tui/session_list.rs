@@ -1,5 +1,6 @@
 use crate::session::store::Store;
 use crate::session::Session;
+use crate::tui::theme::COLORS;
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
@@ -64,7 +65,7 @@ impl SessionListScreen {
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        let accent = Color::from_u32(0x00BB9AF7);
+        let accent = COLORS.accent;
 
         if area.height >= 18 {
             self.render_welcome(f, area, accent);
@@ -119,14 +120,14 @@ impl SessionListScreen {
 
         if !self.loaded {
             let item = ListItem::new("Loading sessions...")
-                .style(Style::default().fg(Color::from_u32(0x006C6C6C)));
+                .style(Style::default().fg(COLORS.placeholder));
             items.push(item);
         } else {
             let new_lines = vec![Line::raw("  New Session"), Line::raw("")];
             let new_item = if self.selected == 0 {
                 ListItem::new(new_lines).style(Style::default().fg(accent))
             } else {
-                ListItem::new(new_lines).style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
+                ListItem::new(new_lines).style(Style::default().fg(COLORS.muted))
             };
             items.push(new_item);
 
@@ -158,7 +159,7 @@ impl SessionListScreen {
                 } else {
                     items.push(
                         ListItem::new(lines)
-                            .style(Style::default().fg(Color::from_u32(0x00C8C8C8))),
+                            .style(Style::default().fg(COLORS.muted)),
                     );
                 }
             }

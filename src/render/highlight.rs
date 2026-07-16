@@ -1,3 +1,4 @@
+use crate::render::theme::VESPER;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{
     Color as SyntectColor, FontStyle, Style, StyleModifier, Theme, ThemeItem, ThemeSettings,
@@ -9,79 +10,39 @@ use once_cell::sync::Lazy;
 
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
 
+fn hex_rgb(hex: &str) -> (u8, u8, u8) {
+    let h = hex.trim_start_matches('#');
+    (
+        u8::from_str_radix(&h[0..2], 16).unwrap_or(0),
+        u8::from_str_radix(&h[2..4], 16).unwrap_or(0),
+        u8::from_str_radix(&h[4..6], 16).unwrap_or(0),
+    )
+}
+
+fn sc(hex: &str) -> SyntectColor {
+    let (r, g, b) = hex_rgb(hex);
+    SyntectColor { r, g, b, a: 0xFF }
+}
+
 fn build_vesper_theme() -> Theme {
     let mut settings = ThemeSettings::default();
 
-    let bg = SyntectColor {
-        r: 0x14,
-        g: 0x14,
-        b: 0x14,
-        a: 0xFF,
-    };
-    let fg = SyntectColor {
-        r: 0xe1,
-        g: 0xe1,
-        b: 0xe1,
-        a: 0xFF,
-    };
-    let keyword_color = SyntectColor {
-        r: 0xbb,
-        g: 0x9a,
-        b: 0xf7,
-        a: 0xFF,
-    };
-    let typ_color = SyntectColor {
-        r: 0x7a,
-        g: 0xa2,
-        b: 0xf7,
-        a: 0xFF,
-    };
-    let string_color = SyntectColor {
-        r: 0x9e,
-        g: 0xce,
-        b: 0x6a,
-        a: 0xFF,
-    };
-    let comment_color = SyntectColor {
-        r: 0x6c,
-        g: 0x6c,
-        b: 0x6c,
-        a: 0xFF,
-    };
-    let operator_color = SyntectColor {
-        r: 0x89,
-        g: 0xdd,
-        b: 0xff,
-        a: 0xFF,
-    };
-    let error_color = SyntectColor {
-        r: 0xf7,
-        g: 0x76,
-        b: 0x8e,
-        a: 0xFF,
-    };
-    let number_color = SyntectColor {
-        r: 0xff,
-        g: 0x9e,
-        b: 0x64,
-        a: 0xFF,
-    };
+    let bg = sc(VESPER.bg);
+    let fg = sc(VESPER.fg);
+    let keyword_color = sc(VESPER.keyword);
+    let function_color = sc(VESPER.function);
+    let typ_color = sc(VESPER.typ);
+    let string_color = sc(VESPER.string);
+    let comment_color = sc(VESPER.comment);
+    let operator_color = sc(VESPER.operator);
+    let error_color = sc(VESPER.error);
+    let number_color = sc(VESPER.number);
 
     settings.background = Some(bg);
     settings.foreground = Some(fg);
     settings.caret = Some(fg);
-    settings.selection = Some(SyntectColor {
-        r: 0x24,
-        g: 0x24,
-        b: 0x24,
-        a: 0xFF,
-    });
-    settings.line_highlight = Some(SyntectColor {
-        r: 0x1c,
-        g: 0x1c,
-        b: 0x1c,
-        a: 0xFF,
-    });
+    settings.selection = Some(sc(VESPER.selected));
+    settings.line_highlight = Some(sc(VESPER.surface));
 
     let mk = |c: SyntectColor| -> StyleModifier {
         StyleModifier {
@@ -122,11 +83,11 @@ fn build_vesper_theme() -> Theme {
         item("entity.name.type", mk(typ_color)),
         item("entity.name.class", mk(typ_color)),
         item("entity.name.namespace", mk(typ_color)),
-        item("entity.name.function", mk(keyword_color)),
-        item("entity.name.function.constructor", mk(keyword_color)),
-        item("support.function", mk(keyword_color)),
-        item("support.function.builtin", mk(keyword_color)),
-        item("entity.name.tag", mk(keyword_color)),
+        item("entity.name.function", mk(function_color)),
+        item("entity.name.function.constructor", mk(function_color)),
+        item("support.function", mk(function_color)),
+        item("support.function.builtin", mk(function_color)),
+        item("entity.name.tag", mk(function_color)),
         item("variable.other.member", mk(fg)),
         item("variable.parameter", mk(fg)),
         item("variable.language", mk(keyword_color)),

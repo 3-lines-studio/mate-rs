@@ -1,13 +1,14 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
 
-use super::chat_format::{format_tool_label, result_lang, tool_color};
+use super::chat_format::{format_tool_label, result_lang, TOOL_COLOR};
 use crate::render::highlight;
+use crate::tui::theme::COLORS;
 
 const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
@@ -20,16 +21,16 @@ pub fn thinking_indicator(
     Line::from(vec![
         Span::styled(
             frame.to_string(),
-            Style::default().fg(Color::from_u32(0x00BB9AF7)),
+            Style::default().fg(COLORS.accent),
         ),
         Span::raw(" "),
         Span::styled(
             label.to_string(),
-            Style::default().fg(Color::from_u32(0x00BB9AF7)),
+            Style::default().fg(COLORS.accent),
         ),
         Span::styled(
             format!(" ({:.0?})", elapsed),
-            Style::default().fg(Color::from_u32(0x006C6C6C)),
+            Style::default().fg(COLORS.placeholder),
         ),
     ])
 }
@@ -64,10 +65,10 @@ pub fn render_tool_block(
     } else if !error.is_empty() {
         "✗"
     } else {
-        "▸"
+        ""
     };
 
-    let color = tool_color(name);
+    let color = TOOL_COLOR;
     let (r, g, b) = crate::render::block::hex_to_rgb(color);
     let label_style = format!("\x1b[38;2;{r};{g};{b}m");
     let reset = "\x1b[0m";
@@ -78,8 +79,10 @@ pub fn render_tool_block(
     }
 
     out.push_str(&prefix);
-    out.push_str(symbol);
-    out.push(' ');
+    if !symbol.is_empty() {
+        out.push_str(symbol);
+        out.push(' ');
+    }
     out.push_str(&name_str);
 
     if is_running {
@@ -91,28 +94,6 @@ pub fn render_tool_block(
 
     if collapsed {
         return out;
-    }
-
-    if !args.is_empty() {
-        out.push('\n');
-        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(args) {
-            if let Some(map) = obj.as_object() {
-                for (i, (k, v)) in map.iter().enumerate() {
-                    if i > 0 {
-                        out.push('\n');
-                    }
-                    out.push_str(&field_prefix);
-                    out.push_str(k);
-                    out.push_str(&format_field_value(v, width.saturating_sub(indent + 2)));
-                }
-            } else {
-                out.push_str(&field_prefix);
-                out.push_str(args);
-            }
-        } else {
-            out.push_str(&field_prefix);
-            out.push_str(args);
-        }
     }
 
     if !result.is_empty() {
@@ -161,47 +142,6 @@ pub fn render_tool_block(
     out
 }
 
-fn format_field_value(val: &serde_json::Value, _width: usize) -> String {
-    match val {
-        serde_json::Value::String(s) => {
-            if s.is_empty() {
-                ": (empty)".to_string()
-            } else {
-                let display = truncate_value(s, 200);
-                format!(": {}", display.replace('\n', " "))
-            }
-        }
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                format!(": {}", i)
-            } else {
-                format!(": {}", n)
-            }
-        }
-        serde_json::Value::Bool(b) => format!(": {}", b),
-        serde_json::Value::Null => ": null".to_string(),
-        _ => {
-            let s = serde_json::to_string(val).unwrap_or_default();
-            format!(": {}", truncate_value(&s, 200))
-        }
-    }
-}
-
-fn truncate_value(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        let safe_len = s
-            .char_indices()
-            .take_while(|(i, _)| *i < max_len)
-            .last()
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
-        let safe = &s[..safe_len];
-        format!("{}... ({} bytes)", safe, s.len())
-    }
-}
-
 pub fn git_branch(cwd: &str) -> Option<String> {
     let mut dir: &std::path::Path = std::path::Path::new(cwd);
     loop {
@@ -231,8 +171,8 @@ fn shorten_cwd(cwd: &str) -> String {
 }
 
 pub fn render_top_bar(f: &mut Frame, area: Rect, cwd: &str, model: &str) {
-    let gray = Color::from_u32(0x006C6C6C);
-    let bright = Color::from_u32(0x00C8C8C8);
+    let gray = COLORS.placeholder;
+    let bright = COLORS.muted;
 
     let mut spans = Vec::new();
     if let Some(branch) = git_branch(cwd) {
@@ -263,10 +203,10 @@ pub fn render_top_bar(f: &mut Frame, area: Rect, cwd: &str, model: &str) {
 
 pub fn render_shortcuts_bar(f: &mut Frame, area: Rect, hints: &[(&str, &str)]) {
     let key_style = Style::default()
-        .fg(Color::from_u32(0x00C8C8C8))
+        .fg(COLORS.muted)
         .add_modifier(Modifier::BOLD);
-    let label_style = Style::default().fg(Color::from_u32(0x006C6C6C));
-    let sep = Span::styled("  │  ", Style::default().fg(Color::from_u32(0x006C6C6C)));
+    let label_style = Style::default().fg(COLORS.placeholder);
+    let sep = Span::styled("  │  ", Style::default().fg(COLORS.placeholder));
 
     let mut spans = Vec::new();
     for (i, (key, label)) in hints.iter().enumerate() {

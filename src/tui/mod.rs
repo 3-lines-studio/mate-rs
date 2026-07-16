@@ -154,14 +154,14 @@ impl App {
                 let p = ratatui::widgets::Paragraph::new(dialog)
                     .style(
                         ratatui::style::Style::default()
-                            .fg(ratatui::style::Color::from_u32(0x00F7768E)),
+                            .fg(crate::tui::theme::COLORS.error),
                     )
                     .block(
                         ratatui::widgets::Block::default()
                             .borders(ratatui::widgets::Borders::ALL)
                             .border_style(
                                 ratatui::style::Style::default()
-                                    .fg(ratatui::style::Color::from_u32(0x00F7768E)),
+                                    .fg(crate::tui::theme::COLORS.error),
                             ),
                     )
                     .alignment(ratatui::layout::Alignment::Center);
@@ -231,180 +231,194 @@ impl App {
                         }
                         _ => {}
                     },
-                    AppState::Chat => match (ctrl, alt, code) {
-                        (true, false, KeyCode::Char('c')) => {
-                            if self.chat.waiting || self.chat.compacting {
-                                self.chat.finish_bot_message_now();
-                                self.chat.waiting = false;
-                                self.chat.compacting = false;
-                                return;
-                            }
-                            if !self.chat.textarea.is_empty() {
-                                self.chat.clear_textarea();
+                    AppState::Chat => {
+                        self.chat.blink_on = true;
+                        self.chat.blink_at = Instant::now();
+                        match (ctrl, alt, code) {
+                            (true, false, KeyCode::Char('c')) => {
+                                if self.chat.waiting || self.chat.compacting {
+                                    self.chat.finish_bot_message_now();
+                                    self.chat.waiting = false;
+                                    self.chat.compacting = false;
+                                    return;
+                                }
+                                if !self.chat.textarea.is_empty() {
+                                    self.chat.clear_textarea();
+                                    self.chat.ctrl_c_pending = true;
+                                    return;
+                                }
+                                if self.chat.ctrl_c_pending {
+                                    self.should_quit = true;
+                                    return;
+                                }
                                 self.chat.ctrl_c_pending = true;
-                                return;
                             }
-                            if self.chat.ctrl_c_pending {
-                                self.should_quit = true;
-                                return;
+                            (false, false, KeyCode::Esc) => {
+                                if self.chat.active_modal != Modal::None {
+                                    self.chat.close_dropdowns();
+                                    return;
+                                }
+                                if self.chat.waiting || self.chat.compacting {
+                                    self.chat.events = None;
+                                    self.chat.finish_bot_message_now();
+                                    self.chat.waiting = false;
+                                    self.chat.compacting = false;
+                                    return;
+                                }
+                                self.reload_current_session();
+                                self.state = AppState::SessionList;
+                                self.chat.reset();
+                                self.session_list.load(&mut self.deps.store);
                             }
-                            self.chat.ctrl_c_pending = true;
-                        }
-                        (false, false, KeyCode::Esc) => {
-                            if self.chat.active_modal != Modal::None {
-                                self.chat.close_dropdowns();
-                                return;
-                            }
-                            if self.chat.waiting || self.chat.compacting {
-                                self.chat.events = None;
-                                self.chat.finish_bot_message_now();
-                                self.chat.waiting = false;
-                                self.chat.compacting = false;
-                                return;
-                            }
-                            self.reload_current_session();
-                            self.state = AppState::SessionList;
-                            self.chat.reset();
-                            self.session_list.load(&mut self.deps.store);
-                        }
-                        (false, false, KeyCode::Enter)
-                            if self.chat.active_modal == Modal::Command =>
-                        {
-                            if let Some((_, action)) = self.chat.command_dropdown.selected_item() {
-                                let action = action.clone();
-                                self.chat.close_dropdowns();
-                                self.execute_command(&action);
-                            }
-                        }
-                        (false, false, KeyCode::Enter)
-                            if self.chat.active_modal == Modal::Template =>
-                        {
-                            if let Some((template, _)) = self.chat.template_dropdown.selected_item()
+                            (false, false, KeyCode::Enter)
+                                if self.chat.active_modal == Modal::Command =>
                             {
-                                let name = template.name.clone();
-                                self.chat.close_dropdowns();
-                                let val = format!("/{} ", name);
-                                self.chat.set_text(&val);
+                                if let Some((_, action)) =
+                                    self.chat.command_dropdown.selected_item()
+                                {
+                                    let action = action.clone();
+                                    self.chat.close_dropdowns();
+                                    self.execute_command(&action);
+                                }
                             }
-                        }
-                        (false, false, KeyCode::Enter) if self.chat.active_modal == Modal::File => {
-                            if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
-                                let path = path.clone();
-                                self.chat.close_dropdowns();
-                                let val = format!("{} ", path);
-                                self.chat.set_text(&val);
+                            (false, false, KeyCode::Enter)
+                                if self.chat.active_modal == Modal::Template =>
+                            {
+                                if let Some((template, _)) =
+                                    self.chat.template_dropdown.selected_item()
+                                {
+                                    let name = template.name.clone();
+                                    self.chat.close_dropdowns();
+                                    let val = format!("/{} ", name);
+                                    self.chat.set_text(&val);
+                                }
                             }
-                        }
-                        (true, false, KeyCode::Char('p')) => {
-                            self.chat.open_command_dropdown();
-                        }
-                        (false, false, KeyCode::Char('/')) => {
-                            self.chat.insert_char('/');
-                            self.chat.open_template_dropdown("");
-                        }
-                        (false, false, KeyCode::Char('@')) => {
-                            self.chat.insert_char('@');
-                            self.chat.ensure_files_loaded();
-                            self.chat.open_file_dropdown("");
-                        }
-                        (true, false, KeyCode::Char('r')) => {
-                            if self.chat.retry_available {
-                                if let Some(ref asession) = self.chat.active_session {
-                                    match asession.retry() {
-                                        Ok(events) => {
-                                            self.chat.events = Some(events);
-                                            self.chat.waiting = true;
-                                            self.chat.wait_start = Instant::now();
-                                            self.chat.wait_ticks = 0;
-                                            self.chat.retry_available = false;
-                                            self.chat.user_scrolled_up = false;
-                                            self.chat.scroll_to_bottom();
-                                        }
-                                        Err(e) => {
-                                            self.chat.add_message("error", &e);
+                            (false, false, KeyCode::Enter)
+                                if self.chat.active_modal == Modal::File =>
+                            {
+                                if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
+                                    let path = path.clone();
+                                    self.chat.close_dropdowns();
+                                    let val = format!("{} ", path);
+                                    self.chat.set_text(&val);
+                                }
+                            }
+                            (true, false, KeyCode::Char('p')) => {
+                                self.chat.open_command_dropdown();
+                            }
+                            (false, false, KeyCode::Char('/')) => {
+                                self.chat.insert_char('/');
+                                self.chat.open_template_dropdown("");
+                            }
+                            (false, false, KeyCode::Char('@')) => {
+                                self.chat.insert_char('@');
+                                self.chat.ensure_files_loaded();
+                                self.chat.open_file_dropdown("");
+                            }
+                            (true, false, KeyCode::Char('r')) => {
+                                if self.chat.retry_available {
+                                    if let Some(ref asession) = self.chat.active_session {
+                                        match asession.retry() {
+                                            Ok(events) => {
+                                                self.chat.events = Some(events);
+                                                self.chat.waiting = true;
+                                                self.chat.wait_start = Instant::now();
+                                                self.chat.wait_ticks = 0;
+                                                self.chat.retry_available = false;
+                                                self.chat.user_scrolled_up = false;
+                                                self.chat.scroll_to_bottom();
+                                            }
+                                            Err(e) => {
+                                                self.chat.add_message("error", &e);
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        (false, true, KeyCode::Enter) | (true, false, KeyCode::Char('j')) => {
-                            if !self.chat.textarea.is_empty() {
-                                self.submit_prompt();
-                            }
-                        }
-                        (false, false, KeyCode::Tab)
-                            if self.chat.active_modal == Modal::Template =>
-                        {
-                            if let Some((template, _)) = self.chat.template_dropdown.selected_item()
-                            {
-                                let name = template.name.clone();
-                                self.chat.close_dropdowns();
-                                let val = format!("/{} ", name);
-                                self.chat.set_text(&val);
-                            }
-                        }
-                        (false, false, KeyCode::Tab) if self.chat.active_modal == Modal::File => {
-                            if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
-                                let path = path.clone();
-                                self.chat.close_dropdowns();
-                                let val = format!("{} ", path);
-                                self.chat.set_text(&val);
-                            }
-                        }
-                        _ => {
-                            if self.chat.waiting {
-                                return;
-                            }
-                            if self.chat.active_modal != Modal::None {
-                                self.handle_modal_key(code);
-                                return;
-                            }
-                            match code {
-                                KeyCode::Up => {
-                                    if self.chat.history_idx + 1 < self.chat.history.len() as isize
-                                    {
-                                        self.chat.history_idx += 1;
-                                        let idx = self
-                                            .chat
-                                            .history
-                                            .len()
-                                            .saturating_sub(1 + self.chat.history_idx as usize);
-                                        self.chat.set_text(&self.chat.history[idx].clone());
-                                    }
+                            (false, true, KeyCode::Enter) | (true, false, KeyCode::Char('j')) => {
+                                if !self.chat.textarea.is_empty() {
+                                    self.submit_prompt();
                                 }
-                                KeyCode::Down => {
-                                    if self.chat.history_idx >= 0 {
-                                        self.chat.history_idx -= 1;
-                                        if self.chat.history_idx >= 0 {
+                            }
+                            (false, false, KeyCode::Tab)
+                                if self.chat.active_modal == Modal::Template =>
+                            {
+                                if let Some((template, _)) =
+                                    self.chat.template_dropdown.selected_item()
+                                {
+                                    let name = template.name.clone();
+                                    self.chat.close_dropdowns();
+                                    let val = format!("/{} ", name);
+                                    self.chat.set_text(&val);
+                                }
+                            }
+                            (false, false, KeyCode::Tab)
+                                if self.chat.active_modal == Modal::File =>
+                            {
+                                if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
+                                    let path = path.clone();
+                                    self.chat.close_dropdowns();
+                                    let val = format!("{} ", path);
+                                    self.chat.set_text(&val);
+                                }
+                            }
+                            (true, false, KeyCode::Left) => self.chat.cursor_left_word(),
+                            (true, false, KeyCode::Right) => self.chat.cursor_right_word(),
+                            _ => {
+                                if self.chat.waiting {
+                                    return;
+                                }
+                                if self.chat.active_modal != Modal::None {
+                                    self.handle_modal_key(code);
+                                    return;
+                                }
+                                match code {
+                                    KeyCode::Up => {
+                                        if !self.chat.cursor_up()
+                                            && self.chat.history_idx + 1
+                                                < self.chat.history.len() as isize
+                                        {
+                                            self.chat.history_idx += 1;
                                             let idx =
                                                 self.chat.history.len().saturating_sub(
                                                     1 + self.chat.history_idx as usize,
                                                 );
                                             self.chat.set_text(&self.chat.history[idx].clone());
-                                        } else {
-                                            self.chat.clear_textarea();
                                         }
                                     }
+                                    KeyCode::Down => {
+                                        if !self.chat.cursor_down() && self.chat.history_idx >= 0 {
+                                            self.chat.history_idx -= 1;
+                                            if self.chat.history_idx >= 0 {
+                                                let idx = self.chat.history.len().saturating_sub(
+                                                    1 + self.chat.history_idx as usize,
+                                                );
+                                                self.chat.set_text(&self.chat.history[idx].clone());
+                                            } else {
+                                                self.chat.clear_textarea();
+                                            }
+                                        }
+                                    }
+                                    KeyCode::Left => self.chat.cursor_left(),
+                                    KeyCode::Right => self.chat.cursor_right(),
+                                    KeyCode::Home => self.chat.cursor_home(),
+                                    KeyCode::End => self.chat.cursor_end(),
+                                    KeyCode::Backspace => self.chat.delete_before_cursor(),
+                                    KeyCode::Enter => self.chat.insert_char('\n'),
+                                    KeyCode::Char(c) => self.chat.insert_char(c),
+                                    KeyCode::PageUp => {
+                                        self.chat.viewport_offset =
+                                            self.chat.viewport_offset.saturating_sub(10);
+                                        self.chat.user_scrolled_up = true;
+                                    }
+                                    KeyCode::PageDown => {
+                                        self.chat.viewport_offset += 10;
+                                    }
+                                    _ => {}
                                 }
-                                KeyCode::Left => self.chat.cursor_left(),
-                                KeyCode::Right => self.chat.cursor_right(),
-                                KeyCode::Home => self.chat.cursor_home(),
-                                KeyCode::End => self.chat.cursor_end(),
-                                KeyCode::Backspace => self.chat.delete_before_cursor(),
-                                KeyCode::Enter => self.chat.insert_char('\n'),
-                                KeyCode::Char(c) => self.chat.insert_char(c),
-                                KeyCode::PageUp => {
-                                    self.chat.viewport_offset =
-                                        self.chat.viewport_offset.saturating_sub(10);
-                                    self.chat.user_scrolled_up = true;
-                                }
-                                KeyCode::PageDown => {
-                                    self.chat.viewport_offset += 10;
-                                }
-                                _ => {}
                             }
                         }
-                    },
+                    }
                 }
             }
             CrosstermEvent::Resize(_, _) => {}
@@ -476,6 +490,7 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
+        self.chat.history.push(text.clone());
         self.chat.clear_textarea();
         let expanded = crate::prompts::expand_text(&self.chat.templates, &text);
         self.chat.add_message("user", &expanded);
@@ -534,6 +549,7 @@ impl App {
             let id = asession.sess().id;
             if let Ok(sess) = self.deps.store.load(&id) {
                 asession.reload_from(sess);
+                self.chat.total_tokens = asession.context_tokens();
             }
         }
     }

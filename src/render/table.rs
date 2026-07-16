@@ -17,6 +17,16 @@ pub fn is_table_line(line: &str) -> bool {
     trimmed.matches('|').count() >= 2
 }
 
+pub fn is_table_delimiter(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.contains('|') && is_table_separator(trimmed)
+}
+
+pub fn looks_like_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty() && trimmed.contains('|')
+}
+
 pub fn is_table_separator(line: &str) -> bool {
     let trimmed = line.trim().trim_matches(|c| c == '|' || c == ' ');
     if trimmed.is_empty() {
@@ -228,7 +238,7 @@ fn write_row_lines(
             })
             .collect();
 
-        let sep = format!("{reset}{border_color}│{border_color}");
+        let sep = format!("{reset}{border_color}│{reset}");
         out.push_str(&format!(
             "{border_color}│{reset} {}{} {} {border_color}│{reset}\n",
             parts.join(&format!(" {} ", sep)),
@@ -460,7 +470,11 @@ fn wrap_inner_text(inner: &str, width: usize) -> Vec<String> {
 fn rewrap_inline(original: &str, inner: &str) -> String {
     if let Some(_m) = match_inline(original, 0, false) {
         match original.chars().next().unwrap_or(' ') {
-            '`' => format!("`{}`", inner),
+            '`' => {
+                let n = original.chars().take_while(|&c| c == '`').count();
+                let ticks = "`".repeat(n);
+                format!("{}{}{}", ticks, inner, ticks)
+            }
             '*' => {
                 if original.starts_with("***") {
                     format!("***{}***", inner)
@@ -514,6 +528,24 @@ mod tests {
     }
 
     #[test]
+    fn test_is_table_delimiter() {
+        assert!(is_table_delimiter("| --- | --- |"));
+        assert!(is_table_delimiter("--- | ---"));
+        assert!(is_table_delimiter(":--: | :-:"));
+        assert!(!is_table_delimiter("---"));
+        assert!(!is_table_delimiter("a | b"));
+        assert!(!is_table_delimiter(""));
+    }
+
+    #[test]
+    fn test_looks_like_table_row() {
+        assert!(looks_like_table_row("foo | bar"));
+        assert!(looks_like_table_row("| a | b |"));
+        assert!(!looks_like_table_row("no pipe here"));
+        assert!(!looks_like_table_row(""));
+    }
+
+    #[test]
     fn test_parse_table_cells() {
         let cells = parse_table_cells("| a | b | c |");
         assert_eq!(cells, vec!["a", "b", "c"]);
@@ -557,5 +589,36 @@ mod tests {
     fn test_render_table_empty() {
         let result = render_table(&[], &[], &[], 80);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_rewrap_inline_backtick_count() {
+        // double-backtick content containing a single backtick must preserve
+        // its delimiter count when rewrapped across lines
+        let got = rewrap_inline("``the `x` long``", "the `x` long");
+        assert_eq!(got, "``the `x` long``");
+        let got = rewrap_inline("`plain`", "plain");
+        assert_eq!(got, "`plain`");
+    }
+
+    #[test]
+    fn test_render_table_body_text_not_border_colored() {
+        let header = vec!["h".to_string()];
+        let rows = vec![vec!["the `bar` value".to_string()]];
+        let result = render_table(&header, &[0], &rows, 40);
+        let text = crate::render::block::ansi_to_text(&result);
+        for line in &text.lines {
+            for span in &line.spans {
+                if span.content.chars().any(|c| c.is_alphanumeric()) {
+                    if let Some(ratatui::style::Color::Rgb(r, g, b)) = span.style.fg {
+                        assert!(
+                            !(r == 52 && g == 52 && b == 52),
+                            "body text leaked border color: {:?}",
+                            span.content
+                        );
+                    }
+                }
+            }
+        }
     }
 }

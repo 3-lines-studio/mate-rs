@@ -6,8 +6,9 @@ pub mod theme;
 pub use block::strip_ansi;
 use block::{header_style, inline_format, styled, truncate, visible_width, wordwrap};
 use table::{
-    is_horizontal_rule, is_table_line, is_table_separator, parse_alignments, parse_table_cells,
-    render_table, TBL_BODY, TBL_HEADER, TBL_NONE,
+    is_horizontal_rule, is_table_delimiter, is_table_line, is_table_separator,
+    looks_like_table_row, parse_alignments, parse_table_cells, render_table, TBL_BODY, TBL_HEADER,
+    TBL_NONE,
 };
 
 pub use highlight::{highlight, highlight_code};
@@ -70,7 +71,14 @@ impl StreamRenderer {
         let formatted = inline_format(text);
         let truncated = truncate(&formatted, self.width, "\u{2026}");
         let (fg, bold, italic) = header_style();
-        styled(&truncated, fg.as_deref(), bold, italic)
+        let header = styled(&truncated, fg.as_deref(), bold, italic);
+        if level == 1 {
+            let w = visible_width(&truncated);
+            let rule = styled(&"─".repeat(w), Some(theme::VESPER.muted), false, false);
+            format!("{}\n{}", header, rule)
+        } else {
+            header
+        }
     }
 
     fn wrap_list_item(&self, prefix: &str, text: &str) -> String {
@@ -140,7 +148,8 @@ impl StreamRenderer {
     fn render_blockquote(&self, line: &str) -> String {
         let rest = line[1..].trim_start();
         let marker = styled("|", Some(theme::VESPER.muted), false, false);
-        self.wrap_list_item(&format!("{} ", marker), rest)
+        let rendered = self.wrap_list_item(&format!("{} ", marker), rest);
+        styled(&rendered, Some(theme::VESPER.muted), false, true)
     }
 
     pub fn render(&self, text: &str) -> String {
@@ -176,7 +185,10 @@ impl StreamRenderer {
                 flush_table(&mut tbl_buf, &mut tbl_state, &mut out, self);
                 if in_code {
                     code_buf.push(line.to_string());
-                    out.push_str(&highlight_code(&code_buf.join("\n"), &code_lang));
+                    out.push_str(&indent_code(&highlight_code(
+                        &code_buf.join("\n"),
+                        &code_lang,
+                    )));
                     out.push('\n');
                     code_buf.clear();
                     code_lang.clear();
@@ -223,7 +235,21 @@ impl StreamRenderer {
                 continue;
             }
 
-            if is_table_line(line) {
+            if tbl_state == TBL_NONE && is_table_delimiter(line) {
+                if let Some(header) = para_buf.last() {
+                    if header.contains('|') {
+                        let header = para_buf.pop().unwrap();
+                        flush_para(&mut para_buf, &mut out, self);
+                        tbl_buf = vec![header, line.to_string()];
+                        tbl_state = TBL_BODY;
+                        continue;
+                    }
+                }
+            }
+
+            if is_table_line(line)
+                || (tbl_state != TBL_NONE && looks_like_table_row(line))
+            {
                 flush_para(&mut para_buf, &mut out, self);
                 match tbl_state {
                     TBL_NONE => {
@@ -281,7 +307,7 @@ impl StreamRenderer {
         flush_table(&mut tbl_buf, &mut tbl_state, &mut out, self);
 
         if in_code && !code_buf.is_empty() {
-            out.push_str(&code_buf.join("\n"));
+            out.push_str(&indent_code(&code_buf.join("\n")));
             out.push('\n');
         }
 
@@ -293,6 +319,15 @@ impl StreamRenderer {
 fn is_code_fence(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
+fn indent_code(rendered: &str) -> String {
+    let bar = styled("┃", Some(theme::VESPER.muted), false, false);
+    rendered
+        .lines()
+        .map(|l| format!("{} {}", bar, l))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn extract_code_lang(line: &str) -> &str {
@@ -545,7 +580,7 @@ mod tests {
         let r = StreamRenderer::new(40);
         let input = "# Title\n\nThis is **bold** and *italic*.";
         let got = strip_ansi_str(&r.render(input));
-        let want = "Title\n\nThis is bold and italic.";
+        let want = "Title\n─────\n\nThis is bold and italic.";
         assert_eq!(got, want);
     }
 
@@ -597,6 +632,25 @@ mod tests {
         assert!(is_code_fence("```go"));
         assert!(is_code_fence("~~~"));
         assert!(!is_code_fence("``"));
+    }
+
+    #[test]
+    fn test_render_gfm_table_no_outer_pipes() {
+        let r = StreamRenderer::new(80);
+        let out = r.render("name | value\n--- | ---\nfoo | bar");
+        let plain = strip_ansi_str(&out);
+        assert!(plain.contains('┌'));
+        assert!(plain.contains("foo"));
+        assert!(plain.contains("bar"));
+    }
+
+    #[test]
+    fn test_render_prose_with_pipe_not_table() {
+        let r = StreamRenderer::new(80);
+        let out = r.render("see the a | b pattern here\nmore text");
+        let plain = strip_ansi_str(&out);
+        assert!(!plain.contains('┌'));
+        assert!(plain.contains("pattern"));
     }
 
     #[test]

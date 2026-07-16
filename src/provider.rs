@@ -165,7 +165,7 @@ pub struct ProviderError {
 
 impl ProviderError {
     pub fn retryable(&self) -> bool {
-        self.status_code == 429 || self.status_code >= 500
+        self.status_code == 0 || self.status_code == 429 || self.status_code >= 500
     }
 }
 

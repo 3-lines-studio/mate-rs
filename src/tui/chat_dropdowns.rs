@@ -1,10 +1,46 @@
 use crate::prompts::Template;
+use crate::tui::theme::COLORS;
 use ratatui::{
-    layout::Rect,
-    style::{Color, Style},
-    widgets::{Block, BorderType, Borders, List, ListItem},
+    layout::{Alignment, Rect},
+    style::Style,
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
     Frame,
 };
+
+pub fn fuzzy_score(query: &str, hay: &str) -> Option<i64> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let q: Vec<char> = query.to_lowercase().chars().collect();
+    let h: Vec<char> = hay.to_lowercase().chars().collect();
+    if q.len() > h.len() {
+        return None;
+    }
+    let mut qi = 0usize;
+    let mut score: i64 = 0;
+    let mut prev_matched = false;
+    let mut first: Option<usize> = None;
+    for (hi, hc) in h.iter().enumerate() {
+        if qi < q.len() && hc == &q[qi] {
+            first.get_or_insert(hi);
+            score += if prev_matched { 16 } else { 1 };
+            if hi == 0 || !h[hi - 1].is_alphanumeric() {
+                score += 8;
+            }
+            prev_matched = true;
+            qi += 1;
+        } else {
+            prev_matched = false;
+        }
+    }
+    if qi != q.len() {
+        return None;
+    }
+    if let Some(f) = first {
+        score -= (f as i64).min(20);
+    }
+    Some(score)
+}
 
 pub const COMMANDS: &[(&str, &str)] = &[
     ("New Session", "new"),
@@ -66,24 +102,34 @@ pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(S
             if i == dropdown.selected {
                 ListItem::new(format!(" {}", label)).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00242424))
-                        .fg(Color::from_u32(0x00BB9AF7)),
+                        .bg(COLORS.selected)
+                        .fg(COLORS.accent),
                 )
             } else {
                 ListItem::new(format!(" {}", label))
-                    .style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
+                    .style(Style::default().fg(COLORS.muted))
             }
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
-            .title("Commands"),
-    );
-    f.render_widget(list, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLORS.border))
+        .title("Commands");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if dropdown.items.is_empty() {
+        f.render_widget(
+            Paragraph::new(" No matches")
+                .style(Style::default().fg(COLORS.placeholder))
+                .alignment(Alignment::Left),
+            inner,
+        );
+        return;
+    }
+    let list = List::new(items);
+    f.render_widget(list, inner);
 }
 
 pub fn render_template_dropdown(
@@ -107,11 +153,11 @@ pub fn render_template_dropdown(
             if i == dropdown.selected {
                 ListItem::new(text).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00242424))
-                        .fg(Color::from_u32(0x00BB9AF7)),
+                        .bg(COLORS.selected)
+                        .fg(COLORS.accent),
                 )
             } else {
-                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
+                ListItem::new(text).style(Style::default().fg(COLORS.muted))
             }
         })
         .collect();
@@ -122,14 +168,24 @@ pub fn render_template_dropdown(
         format!("Templates: /{}", query)
     };
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
-            .title(title.as_str()),
-    );
-    f.render_widget(list, area);
+    let list = List::new(items);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLORS.border))
+        .title(title.as_str());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if dropdown.items.is_empty() {
+        f.render_widget(
+            Paragraph::new(" No matches")
+                .style(Style::default().fg(COLORS.placeholder))
+                .alignment(Alignment::Left),
+            inner,
+        );
+        return;
+    }
+    f.render_widget(list, inner);
 }
 
 pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(String, String)>) {
@@ -141,24 +197,34 @@ pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(Stri
             if i == dropdown.selected {
                 ListItem::new(format!(" {}", path)).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00242424))
-                        .fg(Color::from_u32(0x00BB9AF7)),
+                        .bg(COLORS.selected)
+                        .fg(COLORS.accent),
                 )
             } else {
                 ListItem::new(format!(" {}", path))
-                    .style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
+                    .style(Style::default().fg(COLORS.muted))
             }
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
-            .title("Files"),
-    );
-    f.render_widget(list, area);
+    let list = List::new(items);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLORS.border))
+        .title("Files");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if dropdown.items.is_empty() {
+        f.render_widget(
+            Paragraph::new(" No matches")
+                .style(Style::default().fg(COLORS.placeholder))
+                .alignment(Alignment::Left),
+            inner,
+        );
+        return;
+    }
+    f.render_widget(list, inner);
 }
 
 #[allow(clippy::type_complexity)]
@@ -194,13 +260,13 @@ pub fn render_tree_dropdown(
             if i == dropdown.selected {
                 ListItem::new(text).style(
                     Style::default()
-                        .bg(Color::from_u32(0x00242424))
-                        .fg(Color::from_u32(0x00E0AF68)),
+                        .bg(COLORS.selected)
+                        .fg(COLORS.accent),
                 )
             } else if *is_current {
-                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00E0AF68)))
+                ListItem::new(text).style(Style::default().fg(COLORS.accent))
             } else {
-                ListItem::new(text).style(Style::default().fg(Color::from_u32(0x00C8C8C8)))
+                ListItem::new(text).style(Style::default().fg(COLORS.muted))
             }
         })
         .collect();
@@ -209,7 +275,7 @@ pub fn render_tree_dropdown(
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::from_u32(0x003C3C41)))
+            .border_style(Style::default().fg(COLORS.border))
             .title("Turn Tree"),
     );
     f.render_widget(list, area);
