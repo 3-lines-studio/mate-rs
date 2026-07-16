@@ -1,0 +1,36 @@
+#[derive(Debug, Clone)]
+pub struct Theme {
+    pub bg: &'static str,
+    pub surface: &'static str,
+    pub border: &'static str,
+    pub fg: &'static str,
+    pub accent: &'static str,
+    pub warning: &'static str,
+    pub error: &'static str,
+    pub muted: &'static str,
+    pub keyword: &'static str,
+    pub typ: &'static str,
+    pub string: &'static str,
+    pub function: &'static str,
+    pub number: &'static str,
+    pub comment: &'static str,
+    pub operator: &'static str,
+}
+
+pub const VESPER: Theme = Theme {
+    bg: "#171717",
+    surface: "#1D1D1D",
+    border: "#2D2D2D",
+    fg: "#D4D4D4",
+    accent: "#FFC799",
+    warning: "#FFCB8B",
+    error: "#FF8080",
+    muted: "#6A6A6A",
+    keyword: "#FFC799",
+    typ: "#FFCB8B",
+    string: "#99FFE4",
+    function: "#FFC799",
+    number: "#FFC799",
+    comment: "#6A6A6A",
+    operator: "#D4D4D4",
+};

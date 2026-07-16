@@ -1,0 +1,171 @@
+use crate::agent;
+use crate::config::Config;
+use crate::prompts;
+use crate::session::store::Store;
+use crate::skills;
+use crate::tools;
+use sha2::{Digest, Sha256};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use super::resolve::{resolve_client, resolve_subagents};
+use super::Deps;
+
+pub fn init_with_config(
+    cfg: Config,
+    system_prompt: String,
+    cwd: &str,
+    store_dir: &str,
+    verbose: bool,
+) -> Result<Deps, Box<dyn std::error::Error + Send + Sync>> {
+    for p in &cfg.providers {
+        if p.id.is_empty() {
+            return Err("provider missing id".into());
+        }
+    }
+    for m in &cfg.models {
+        if m.id.is_empty() {
+            return Err("model missing id".into());
+        }
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(cwd.as_bytes());
+    let hash = hex::encode(&hasher.finalize()[..8]);
+    let store = Store::new(&format!("{}/{}", store_dir, hash))?;
+
+    let (client, model_name) = resolve_client(
+        &cfg.agent.model,
+        &cfg.models,
+        &cfg.providers,
+        verbose,
+    )
+    .map_err(|e| format!("main model: {}", e))?;
+
+    let mut compaction_client = None;
+    if !cfg.agent.compaction_model.is_empty() {
+        match resolve_client(
+            &cfg.agent.compaction_model,
+            &cfg.models,
+            &cfg.providers,
+            verbose,
+        ) {
+            Ok((cc, _)) => compaction_client = Some(cc),
+            Err(e) => {
+                log::warn!(
+                    "compaction model not resolved, compaction disabled model={}: {}",
+                    cfg.agent.compaction_model,
+                    e
+                );
+            }
+        }
+    }
+
+    let sp = if system_prompt.is_empty() {
+        agent::build_system_prompt("", "", "", &cfg.agent.prompt)
+    } else {
+        system_prompt
+    };
+
+    let mut registry = tools::Registry::new();
+    let tool_list = if cfg.agent.tools.is_empty() {
+        tools::catalog_names()
+    } else {
+        cfg.agent.tools.clone()
+    };
+
+    for name in &tool_list {
+        if let Some(t) = tools::lookup(name) {
+            if let Err(e) = registry.register(t) {
+                log::warn!("registering tool tool={}: {}", name, e);
+            }
+        } else {
+            log::warn!("unknown tool in config tool={}", name);
+        }
+    }
+
+    let subagents = resolve_subagents(&cfg, "", "", "", verbose);
+    let max_rounds = cfg.agent.max_tool_rounds;
+
+    Ok(Deps {
+        config: cfg,
+        client,
+        compaction_client,
+        model_name,
+        registry: Arc::new(registry),
+        system_prompt: sp,
+        max_rounds,
+        cwd: cwd.to_string(),
+        store,
+        subagents,
+        skills: None,
+        config_dir: String::new(),
+        agent_name: String::new(),
+        templates: Vec::new(),
+    })
+}
+
+pub fn init(
+    verbose: bool,
+    config_dir: &str,
+) -> Result<Deps, Box<dyn std::error::Error + Send + Sync>> {
+    let cfg_dir = if config_dir.is_empty() {
+        crate::config::dir()
+    } else {
+        config_dir.to_string()
+    };
+
+    let cfg = crate::config::load_from(&cfg_dir)?;
+
+    let system_md = read_file_if_exists(&format!("{}/SYSTEM.md", cfg_dir));
+    let global_md = read_file_if_exists(&format!("{}/AGENTS.md", cfg_dir));
+    let local_md = read_file_if_exists("AGENTS.md");
+
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+
+    let system_prompt = agent::build_system_prompt(&system_md, &global_md, &local_md, &cfg.agent.prompt);
+
+    let session_dir = cfg.session.dir.clone();
+    let mut deps = init_with_config(cfg, system_prompt, &cwd, &session_dir, verbose)?;
+
+    deps.config_dir = cfg_dir.clone();
+    deps.max_rounds = deps.config.agent.max_tool_rounds;
+
+    deps.templates = load_templates(&cfg_dir);
+    deps.subagents = resolve_subagents(&deps.config, &system_md, &global_md, &local_md, verbose);
+
+    let skill_store = skills::load_skill_dirs(&deps.cwd, &cfg_dir)?;
+    if let Some(reg) = Arc::get_mut(&mut deps.registry) {
+        let _ = reg.register(skill_store.list_tool());
+        let _ = reg.register(skill_store.load_tool());
+    }
+    deps.skills = Some(skill_store);
+
+    Ok(deps)
+}
+
+fn load_templates(cfg_dir: &str) -> Vec<crate::prompts::Template> {
+    let templates_dir = format!("{}/prompts", cfg_dir);
+    match prompts::load(&templates_dir) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("loading prompt templates: {}", e);
+            Vec::new()
+        }
+    }
+}
+
+fn read_file_if_exists(path: &str) -> String {
+    match std::fs::read_to_string(path) {
+        Ok(data) => data,
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("reading file path={}: {}", path, e);
+            }
+            String::new()
+        }
+    }
+}
