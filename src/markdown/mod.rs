@@ -3,6 +3,128 @@ pub mod telegram;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::collections::HashMap;
+
+pub(crate) static RE_CODE_BLOCK: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
+pub(crate) static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`[^`\n]+`").unwrap());
+pub(crate) static RE_HEADING: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)^#{1,6}\s+(.+)$").unwrap());
+pub(crate) static RE_BOLD1: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
+pub(crate) static RE_BOLD2: Lazy<Regex> = Lazy::new(|| Regex::new(r"__(.+?)__").unwrap());
+pub(crate) static RE_ITALIC: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*(.+?)\*").unwrap());
+pub(crate) static RE_STRIKE: Lazy<Regex> = Lazy::new(|| Regex::new(r"~~(.+?)~~").unwrap());
+pub(crate) static RE_LINK: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
+pub(crate) static RE_LIST: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^(\s*)[-*]\s+").unwrap());
+pub(crate) static RE_MULTI_NL: Lazy<Regex> = Lazy::new(|| Regex::new(r"\n{3,}").unwrap());
+
+pub(crate) const P_SUFFIX: &str = "\u{00a7}";
+pub(crate) const P_BOLD_S: &str = "\u{00a7}BS\u{00a7}";
+pub(crate) const P_BOLD_E: &str = "\u{00a7}BE\u{00a7}";
+
+pub(crate) static RE_BOLD_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
+    let pat = format!(
+        "{}{}{}",
+        regex::escape(P_BOLD_S),
+        r"(.+?)",
+        regex::escape(P_BOLD_E)
+    );
+    Regex::new(&pat).unwrap()
+});
+
+pub(crate) fn strip_formatting(s: &str) -> String {
+    let s = RE_BOLD1.replace_all(s, "$1").to_string();
+    let s = RE_BOLD2.replace_all(&s, "$1").to_string();
+    RE_ITALIC.replace_all(&s, "$1").to_string()
+}
+
+pub(crate) type PreHeadingFn =
+    fn(&str, &mut Vec<String>, &mut [String]) -> (String, HashMap<usize, bool>);
+pub(crate) type Phase1Fn = fn(&str) -> String;
+pub(crate) type Phase2Fn = fn(&str) -> String;
+pub(crate) type CleanCbFn = fn(&str) -> String;
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn markdown_to_platform(
+    text: &str,
+    cb_prefix: &str,
+    ic_prefix: &str,
+    pre_heading: PreHeadingFn,
+    phase1: Phase1Fn,
+    phase2: Phase2Fn,
+    clean_cb: CleanCbFn,
+) -> String {
+    if text.is_empty() {
+        return text.to_string();
+    }
+
+    let mut code_blocks: Vec<String> = Vec::new();
+    let mut inline_codes: Vec<String> = Vec::new();
+
+    let mut text = RE_CODE_BLOCK
+        .replace_all(text, |caps: &regex::Captures| {
+            let idx = code_blocks.len();
+            code_blocks.push(caps[0].to_string());
+            format!("{}{}{}", cb_prefix, idx, P_SUFFIX)
+        })
+        .to_string();
+
+    text = RE_INLINE_CODE
+        .replace_all(&text, |caps: &regex::Captures| {
+            let idx = inline_codes.len();
+            inline_codes.push(caps[0].to_string());
+            format!("{}{}{}", ic_prefix, idx, P_SUFFIX)
+        })
+        .to_string();
+
+    let (mut text, resolved_inlines) = pre_heading(&text, &mut code_blocks, &mut inline_codes);
+
+    text = RE_HEADING
+        .replace_all(&text, |caps: &regex::Captures| {
+            let content = caps[1].to_string();
+            let content = strip_formatting(&content);
+            format!("{}{}{}", P_BOLD_S, content, P_BOLD_E)
+        })
+        .to_string();
+
+    text = RE_BOLD1
+        .replace_all(&text, |caps: &regex::Captures| {
+            format!("{}{}{}", P_BOLD_S, &caps[1], P_BOLD_E)
+        })
+        .to_string();
+    text = RE_BOLD2
+        .replace_all(&text, |caps: &regex::Captures| {
+            format!("{}{}{}", P_BOLD_S, &caps[1], P_BOLD_E)
+        })
+        .to_string();
+
+    text = phase1(&text);
+
+    text = RE_LIST.replace_all(&text, "${1}\u{2022}  ").to_string();
+
+    text = phase2(&text);
+
+    for (i, block) in code_blocks.iter().enumerate() {
+        let cleaned = clean_cb(block);
+        let placeholder = format!("{}{}{}", cb_prefix, i, P_SUFFIX);
+        text = text.replace(&placeholder, &format!("\n{}\n", cleaned));
+    }
+
+    for (i, code) in inline_codes.iter().enumerate() {
+        if !resolved_inlines.contains_key(&i) {
+            let placeholder = format!("{}{}{}", ic_prefix, i, P_SUFFIX);
+            text = text.replace(&placeholder, code);
+        }
+    }
+
+    text = RE_MULTI_NL.replace_all(&text, "\n\n").to_string();
+
+    text = text.trim_start_matches('\n').to_string();
+    text = text.trim_end_matches('\n').to_string();
+
+    text
+}
 
 static RE_CODE_BLOCK_GLOBAL: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
 

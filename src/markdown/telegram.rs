@@ -1,21 +1,9 @@
+use super::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-static RE_CODE_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
-static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`[^`\n]+`").unwrap());
-static RE_HEADING: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^#{1,6}\s+(.+)$").unwrap());
-static RE_BOLD1: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
-static RE_BOLD2: Lazy<Regex> = Lazy::new(|| Regex::new(r"__(.+?)__").unwrap());
-static RE_ITALIC: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*(.+?)\*").unwrap());
-static RE_STRIKE: Lazy<Regex> = Lazy::new(|| Regex::new(r"~~(.+?)~~").unwrap());
-static RE_LINK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
-static RE_LIST: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^(\s*)[-*]\s+").unwrap());
-static RE_MULTI_NL: Lazy<Regex> = Lazy::new(|| Regex::new(r"\n{3,}").unwrap());
-
 const P_CODE_BLOCK: &str = "\u{00a7}C";
 const P_INLINE_CODE: &str = "\u{00a7}I";
-const P_BOLD_S: &str = "\u{00a7}BS\u{00a7}";
-const P_BOLD_E: &str = "\u{00a7}BE\u{00a7}";
 const P_ITALIC_S: &str = "\u{00a7}IS\u{00a7}";
 const P_ITALIC_E: &str = "\u{00a7}IE\u{00a7}";
 const P_STRIKE_S: &str = "\u{00a7}SS\u{00a7}";
@@ -23,17 +11,6 @@ const P_STRIKE_E: &str = "\u{00a7}SE\u{00a7}";
 const P_LINK_S: &str = "\u{00a7}LS\u{00a7}";
 const P_LINK_SEP: &str = "\u{00a7}LP\u{00a7}";
 const P_LINK_E: &str = "\u{00a7}LE\u{00a7}";
-const P_SUFFIX: &str = "\u{00a7}";
-
-static RE_BOLD_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(&format!(
-        "{}{}{}",
-        regex::escape(P_BOLD_S),
-        r"(.+?)",
-        regex::escape(P_BOLD_E)
-    ))
-    .unwrap()
-});
 
 static RE_ITALIC_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(
@@ -95,74 +72,50 @@ static RE_ANY_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
 });
 
 pub fn markdown_to_telegram(text: &str) -> String {
-    if text.is_empty() {
-        return text.to_string();
-    }
+    markdown_to_platform(
+        text,
+        P_CODE_BLOCK,
+        P_INLINE_CODE,
+        telegram_pre_heading,
+        telegram_phase1,
+        telegram_phase2,
+        telegram_clean_cb,
+    )
+}
 
-    let mut code_blocks: Vec<String> = Vec::new();
-    let mut inline_codes: Vec<String> = Vec::new();
+fn telegram_pre_heading(
+    text: &str,
+    _code_blocks: &mut Vec<String>,
+    _inline_codes: &mut [String],
+) -> (String, HashMap<usize, bool>) {
+    (text.to_string(), HashMap::new())
+}
 
-    let mut text = RE_CODE_BLOCK
+fn telegram_phase1(text: &str) -> String {
+    let text = RE_ITALIC
         .replace_all(text, |caps: &regex::Captures| {
-            let idx = code_blocks.len();
-            code_blocks.push(caps[0].to_string());
-            format!("{}{}{}", P_CODE_BLOCK, idx, P_SUFFIX)
-        })
-        .to_string();
-
-    text = RE_INLINE_CODE
-        .replace_all(&text, |caps: &regex::Captures| {
-            let idx = inline_codes.len();
-            inline_codes.push(caps[0].to_string());
-            format!("{}{}{}", P_INLINE_CODE, idx, P_SUFFIX)
-        })
-        .to_string();
-
-    text = RE_HEADING
-        .replace_all(&text, |caps: &regex::Captures| {
-            let content = &caps[1];
-            let content = strip_formatting(content);
-            format!("{}{}{}", P_BOLD_S, content, P_BOLD_E)
-        })
-        .to_string();
-
-    text = RE_BOLD1
-        .replace_all(&text, |caps: &regex::Captures| {
-            format!("{}{}{}", P_BOLD_S, &caps[1], P_BOLD_E)
-        })
-        .to_string();
-    text = RE_BOLD2
-        .replace_all(&text, |caps: &regex::Captures| {
-            format!("{}{}{}", P_BOLD_S, &caps[1], P_BOLD_E)
-        })
-        .to_string();
-
-    text = RE_ITALIC
-        .replace_all(&text, |caps: &regex::Captures| {
             format!("{}{}{}", P_ITALIC_S, &caps[1], P_ITALIC_E)
         })
         .to_string();
-
-    text = RE_STRIKE
+    let text = RE_STRIKE
         .replace_all(&text, |caps: &regex::Captures| {
             format!("{}{}{}", P_STRIKE_S, &caps[1], P_STRIKE_E)
         })
         .to_string();
-
-    text = RE_LINK
+    RE_LINK
         .replace_all(&text, |caps: &regex::Captures| {
             format!(
                 "{}{}{}{}{}",
                 P_LINK_S, &caps[1], P_LINK_SEP, &caps[2], P_LINK_E
             )
         })
-        .to_string();
+        .to_string()
+}
 
-    text = RE_LIST.replace_all(&text, "${1}\u{2022}  ").to_string();
+fn telegram_phase2(text: &str) -> String {
+    let text = escape_telegram(text);
 
-    text = escape_telegram(&text);
-
-    text = RE_BOLD_PLACEHOLDER
+    let text = RE_BOLD_PLACEHOLDER
         .replace_all(&text, |caps: &regex::Captures| {
             let inner = caps[1].to_string();
             let inner = escape_nested(&inner, &['*', '_']);
@@ -170,7 +123,7 @@ pub fn markdown_to_telegram(text: &str) -> String {
         })
         .to_string();
 
-    text = RE_ITALIC_PLACEHOLDER
+    let text = RE_ITALIC_PLACEHOLDER
         .replace_all(&text, |caps: &regex::Captures| {
             let inner = caps[1].to_string();
             let inner = escape_nested(&inner, &['_']);
@@ -178,7 +131,7 @@ pub fn markdown_to_telegram(text: &str) -> String {
         })
         .to_string();
 
-    text = RE_STRIKE_PLACEHOLDER
+    let text = RE_STRIKE_PLACEHOLDER
         .replace_all(&text, |caps: &regex::Captures| {
             let inner = caps[1].to_string();
             let inner = escape_nested(&inner, &['~']);
@@ -186,26 +139,13 @@ pub fn markdown_to_telegram(text: &str) -> String {
         })
         .to_string();
 
-    text = RE_LINK_PLACEHOLDER
+    RE_LINK_PLACEHOLDER
         .replace_all(&text, "[${1}](${2})")
-        .to_string();
+        .to_string()
+}
 
-    for (i, block) in code_blocks.iter().enumerate() {
-        let placeholder = format!("{}{}{}", P_CODE_BLOCK, i, P_SUFFIX);
-        text = text.replace(&placeholder, &format!("\n{}\n", block));
-    }
-
-    for (i, code) in inline_codes.iter().enumerate() {
-        let placeholder = format!("{}{}{}", P_INLINE_CODE, i, P_SUFFIX);
-        text = text.replace(&placeholder, code);
-    }
-
-    text = RE_MULTI_NL.replace_all(&text, "\n\n").to_string();
-
-    text = text.trim_start_matches('\n').to_string();
-    text = text.trim_end_matches('\n').to_string();
-
-    text
+fn telegram_clean_cb(block: &str) -> String {
+    block.to_string()
 }
 
 fn escape_telegram(text: &str) -> String {
@@ -232,12 +172,6 @@ fn escape_telegram(text: &str) -> String {
     }
 
     buf
-}
-
-fn strip_formatting(s: &str) -> String {
-    let s = RE_BOLD1.replace_all(s, "$1").to_string();
-    let s = RE_BOLD2.replace_all(&s, "$1").to_string();
-    RE_ITALIC.replace_all(&s, "$1").to_string()
 }
 
 fn escape_nested(s: &str, chars: &[char]) -> String {

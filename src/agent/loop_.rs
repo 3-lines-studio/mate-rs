@@ -157,20 +157,10 @@ impl super::AgentSession {
         msgs.extend_from_slice(&self.working_messages);
 
         ChatRequest {
-            model: String::new(),
             messages: msgs,
             tools: self.cached_tool_defs.clone(),
-            stream: false,
-            max_tokens: 0,
-            stream_options: None,
-            thinking: None,
-            reasoning_effort: String::new(),
-            reasoning: None,
-            models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            cache_control: None,
             session_id: self.sess.id.clone(),
+            ..Default::default()
         }
     }
 
@@ -243,15 +233,13 @@ impl super::AgentSession {
                     result.tool_calls.push(call);
                 }
                 StreamEvent::Usage { usage } => {
-                    self.counters.total_prompt_tokens += usage.prompt_tokens;
-                    self.counters.total_completion_tokens += usage.completion_tokens;
-                    self.counters.last_request_tokens = usage.prompt_tokens;
-                    self.counters.last_total_tokens = usage.total_tokens;
-                    if self.counters.last_total_tokens == 0 {
-                        self.counters.last_total_tokens =
-                            usage.prompt_tokens + usage.completion_tokens;
+                    self.sess.prompt_tokens += usage.prompt_tokens;
+                    self.sess.completion_tokens += usage.completion_tokens;
+                    self.sess.context_tokens = usage.total_tokens;
+                    if self.sess.context_tokens == 0 {
+                        self.sess.context_tokens = usage.prompt_tokens + usage.completion_tokens;
                     }
-                    self.counters.total_cost += self.client.cost_for(&usage);
+                    self.sess.cost += self.client.cost_for(&usage);
                     let _ = events.send(Event::usage_ev(usage)).await;
                 }
                 StreamEvent::ReasoningDetails { details } => {
@@ -302,12 +290,7 @@ impl super::AgentSession {
 
         self.sess.current_turn = turn_id;
         self.sess.turn_count += 1;
-        self.sess.prompt_tokens = self.counters.total_prompt_tokens;
-        self.sess.completion_tokens = self.counters.total_completion_tokens;
-        self.sess.total_tokens =
-            self.counters.total_prompt_tokens + self.counters.total_completion_tokens;
-        self.sess.context_tokens = self.counters.last_total_tokens;
-        self.sess.cost = self.counters.total_cost;
+        self.sess.total_tokens = self.sess.prompt_tokens + self.sess.completion_tokens;
 
         if !self.sess.named {
             let label = crate::session::types::turn_label(&self.working_messages);

@@ -124,31 +124,31 @@ pub fn build_index_background(cwd: &str) {
 }
 
 pub fn symbols_tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "kind".to_string(),
-        serde_json::json!({"type": "string", "description": "Query kind: \"find\" (definitions), \"refs\" (call sites), or \"list\" (symbols in a file)"}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "kind",
+                serde_json::json!({"type": "string", "description": "Query kind: \"find\" (definitions), \"refs\" (call sites), or \"list\" (symbols in a file)"}),
+            ),
+            (
+                "name",
+                serde_json::json!({"type": "string", "description": "Symbol name (exact match) for find/refs queries"}),
+            ),
+            (
+                "file",
+                serde_json::json!({"type": "string", "description": "Relative file path for list query"}),
+            ),
+            (
+                "path",
+                serde_json::json!({"type": "string", "description": "Root directory (default: \".\")"}),
+            ),
+            (
+                "max_results",
+                serde_json::json!({"type": "integer", "description": "Maximum results (default: 100)"}),
+            ),
+        ],
+        &["kind"],
     );
-    properties.insert(
-        "name".to_string(),
-        serde_json::json!({"type": "string", "description": "Symbol name (exact match) for find/refs queries"}),
-    );
-    properties.insert(
-        "file".to_string(),
-        serde_json::json!({"type": "string", "description": "Relative file path for list query"}),
-    );
-    properties.insert(
-        "path".to_string(),
-        serde_json::json!({"type": "string", "description": "Root directory (default: \".\")"}),
-    );
-    properties.insert(
-        "max_results".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum results (default: 100)"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["kind"]));
 
     define_tool(
         "symbols",

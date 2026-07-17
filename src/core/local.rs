@@ -42,33 +42,15 @@ impl Interface for LocalInterface {
             loop {
                 let ev = rt.block_on(events.recv());
                 match ev {
-                    Some(ev) => match ev.kind {
-                        crate::agent::EventKind::TextDelta(delta) => {
-                            print!("{}", delta);
-                            stdout.flush()?;
-                        }
-                        crate::agent::EventKind::ToolCallStart { name, .. } => {
-                            println!("\n[{}()]", name);
-                        }
-                        crate::agent::EventKind::ToolResult { result, .. } => {
-                            let lines: Vec<&str> = result.lines().collect();
-                            if lines.len() > 10 {
-                                for l in &lines[..10] {
-                                    println!("{}", l);
-                                }
-                                println!("... ({} lines total)", lines.len());
-                            } else {
-                                println!("{}", result);
-                            }
-                        }
-                        crate::agent::EventKind::ToolError { name, error, .. } => {
+                    Some(ev) => match crate::agent::print_event(&ev, true) {
+                        crate::agent::StdioEvent::Handled => {}
+                        crate::agent::StdioEvent::ToolError { name, error } => {
                             println!("[{} error: {}]", name, error);
                         }
-                        crate::agent::EventKind::Error(msg) => {
+                        crate::agent::StdioEvent::Error(msg) => {
                             println!("\nError: {}", msg);
                         }
-                        crate::agent::EventKind::AgentDone(_) => {}
-                        _ => {}
+                        crate::agent::StdioEvent::AgentDone => {}
                     },
                     None => break,
                 }

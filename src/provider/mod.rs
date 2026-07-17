@@ -34,7 +34,7 @@ pub struct CacheControl {
     pub ttl: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatRequest {
     pub model: String,
     pub messages: Vec<Message>,
@@ -61,6 +61,53 @@ pub struct ChatRequest {
     pub cache_control: Option<CacheControl>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub session_id: String,
+}
+
+impl ChatRequest {
+    fn apply_profile(&mut self, profile: &ModelProfile) {
+        if profile.open_router {
+            if !profile.reasoning_effort.is_empty() || profile.reasoning_max_tokens > 0 {
+                self.reasoning = Some(ReasoningConfig {
+                    effort: profile.reasoning_effort.clone(),
+                    max_tokens: profile.reasoning_max_tokens,
+                    exclude: None,
+                    enabled: None,
+                });
+            }
+        } else {
+            if !profile.thinking_type.is_empty() {
+                self.thinking = Some(ThinkingConfig {
+                    thinking_type: profile.thinking_type.clone(),
+                });
+            }
+            if !profile.reasoning_effort.is_empty() {
+                self.reasoning_effort = profile.reasoning_effort.clone();
+            }
+        }
+        if !profile.fallback_models.is_empty() {
+            self.models = profile.fallback_models.clone();
+        }
+        if !profile.route.is_empty() {
+            self.route = profile.route.clone();
+        }
+        if let Some(prefs) = &profile.provider_prefs {
+            self.provider_prefs = Some(prefs.clone());
+        }
+
+        if profile.prompt_cache {
+            let mut cc = CacheControl {
+                cc_type: "ephemeral".to_string(),
+                ttl: String::new(),
+            };
+            if profile.prompt_cache_ttl == "1h" {
+                cc.ttl = "1h".to_string();
+            }
+            self.cache_control = Some(cc);
+        }
+        if !profile.open_router {
+            self.session_id = String::new();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +146,27 @@ pub struct ModelProfile {
     pub provider_prefs: Option<ProviderPreferences>,
     pub prompt_cache: bool,
     pub prompt_cache_ttl: String,
+}
+
+impl Default for ModelProfile {
+    fn default() -> Self {
+        Self {
+            context_window: 0,
+            max_output_tokens: 0,
+            thinking_type: String::new(),
+            reasoning_effort: String::new(),
+            reasoning_max_tokens: 0,
+            open_router: false,
+            input_price: 0.0,
+            cached_input_price: 0.0,
+            output_price: 0.0,
+            fallback_models: Vec::new(),
+            route: String::new(),
+            provider_prefs: None,
+            prompt_cache: false,
+            prompt_cache_ttl: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,48 +315,7 @@ impl ChatClient for Client {
         if req.max_tokens <= 0 {
             req.max_tokens = self.profile.max_output_tokens;
         }
-        if self.profile.open_router {
-            if !self.profile.reasoning_effort.is_empty() || self.profile.reasoning_max_tokens > 0 {
-                req.reasoning = Some(ReasoningConfig {
-                    effort: self.profile.reasoning_effort.clone(),
-                    max_tokens: self.profile.reasoning_max_tokens,
-                    exclude: None,
-                    enabled: None,
-                });
-            }
-        } else {
-            if !self.profile.thinking_type.is_empty() {
-                req.thinking = Some(ThinkingConfig {
-                    thinking_type: self.profile.thinking_type.clone(),
-                });
-            }
-            if !self.profile.reasoning_effort.is_empty() {
-                req.reasoning_effort = self.profile.reasoning_effort.clone();
-            }
-        }
-        if !self.profile.fallback_models.is_empty() {
-            req.models = self.profile.fallback_models.clone();
-        }
-        if !self.profile.route.is_empty() {
-            req.route = self.profile.route.clone();
-        }
-        if let Some(prefs) = &self.profile.provider_prefs {
-            req.provider_prefs = Some(prefs.clone());
-        }
-
-        if self.profile.prompt_cache {
-            let mut cc = CacheControl {
-                cc_type: "ephemeral".to_string(),
-                ttl: String::new(),
-            };
-            if self.profile.prompt_cache_ttl == "1h" {
-                cc.ttl = "1h".to_string();
-            }
-            req.cache_control = Some(cc);
-        }
-        if !self.profile.open_router {
-            req.session_id = String::new();
-        }
+        req.apply_profile(&self.profile);
 
         for msg in &mut req.messages {
             msg.tool_duration = String::new();
@@ -410,6 +437,111 @@ struct StreamChunk {
     error: Option<StreamError>,
 }
 
+fn next_sse_lines(buffer: &mut String) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = buffer.find('\n') {
+        let line = buffer[..pos].trim_end_matches('\r').to_string();
+        *buffer = buffer[pos + 1..].to_string();
+        lines.push(line);
+    }
+    lines
+}
+
+fn merge_tool_call_deltas(
+    tool_calls: &mut HashMap<i32, StreamToolCall>,
+    tc_list: &[StreamChunkChoiceDeltaToolCall],
+) {
+    for tc in tc_list {
+        let idx = tc.index.unwrap_or(0);
+        let entry = tool_calls.entry(idx).or_insert_with(|| StreamToolCall {
+            id: String::new(),
+            name: String::new(),
+            arguments: String::new(),
+        });
+        if let Some(ref id) = tc.id {
+            if !id.is_empty() {
+                entry.id = id.clone();
+            }
+        }
+        if let Some(ref func) = tc.function {
+            if let Some(ref name) = func.name {
+                entry.name = name.clone();
+            }
+            if let Some(ref args) = func.arguments {
+                entry.arguments.push_str(args);
+            }
+        }
+    }
+}
+
+async fn merge_reasoning_details(
+    reasoning_details: &mut HashMap<i32, ReasoningDetail>,
+    reasoning_detail_order: &mut Vec<i32>,
+    rd_list: &[StreamChunkChoiceDeltaReasoningDetail],
+    tx: &mpsc::Sender<StreamEvent>,
+) -> bool {
+    let mut detail_delta = false;
+    for rd in rd_list {
+        let idx = if let Some(i) = rd.index {
+            i
+        } else {
+            let mut i = 0;
+            while reasoning_details.contains_key(&i) {
+                i += 1;
+            }
+            i
+        };
+
+        let entry = reasoning_details.entry(idx).or_insert_with(|| {
+            reasoning_detail_order.push(idx);
+            ReasoningDetail {
+                detail_type: rd.rd_type.clone(),
+                id: String::new(),
+                format: String::new(),
+                text: String::new(),
+                signature: String::new(),
+                summary: String::new(),
+                data: String::new(),
+            }
+        });
+
+        if !rd.rd_type.is_empty() {
+            entry.detail_type = rd.rd_type.clone();
+        }
+        if let Some(ref id) = rd.id {
+            entry.id = id.clone();
+        }
+        if let Some(ref fmt) = rd.format {
+            entry.format = fmt.clone();
+        }
+        if let Some(ref text) = rd.text {
+            entry.text.push_str(text);
+            let _ = tx
+                .send(StreamEvent::ReasoningDelta {
+                    delta: text.clone(),
+                })
+                .await;
+            detail_delta = true;
+        }
+        if let Some(ref sig) = rd.signature {
+            entry.signature = sig.clone();
+        }
+        if let Some(ref summary) = rd.summary {
+            entry.summary.push_str(summary);
+            let _ = tx
+                .send(StreamEvent::ReasoningDelta {
+                    delta: summary.clone(),
+                })
+                .await;
+            detail_delta = true;
+        }
+        if let Some(ref d) = rd.data {
+            entry.data = d.clone();
+        }
+    }
+    detail_delta
+}
+
 async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, debug: bool) {
     use futures_util::StreamExt;
 
@@ -420,7 +552,6 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
     let mut tool_calls: HashMap<i32, StreamToolCall> = HashMap::new();
     let mut reasoning_details: HashMap<i32, ReasoningDetail> = HashMap::new();
     let mut reasoning_detail_order: Vec<i32> = Vec::new();
-    let mut next_detail_idx: i32 = 0;
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = match chunk_result {
@@ -440,15 +571,10 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
 
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-        while let Some(line_end) = buffer.find('\n') {
-            let line = buffer[..line_end].to_string();
-            buffer = buffer[line_end + 1..].to_string();
-
+        for line in next_sse_lines(&mut buffer) {
             if debug {
                 eprintln!("stream line: {}", line);
             }
-
-            let line = line.trim_end_matches('\r').to_string();
 
             if line.is_empty() {
                 continue;
@@ -516,67 +642,13 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
                         let mut detail_delta = false;
 
                         if let Some(rd_list) = &delta.reasoning_details {
-                            for rd in rd_list {
-                                let idx = if let Some(i) = rd.index {
-                                    i
-                                } else {
-                                    loop {
-                                        if !reasoning_details.contains_key(&next_detail_idx) {
-                                            let idx = next_detail_idx;
-                                            next_detail_idx += 1;
-                                            break idx;
-                                        }
-                                        next_detail_idx += 1;
-                                    }
-                                };
-
-                                let entry = reasoning_details.entry(idx).or_insert_with(|| {
-                                    reasoning_detail_order.push(idx);
-                                    ReasoningDetail {
-                                        detail_type: rd.rd_type.clone(),
-                                        id: String::new(),
-                                        format: String::new(),
-                                        text: String::new(),
-                                        signature: String::new(),
-                                        summary: String::new(),
-                                        data: String::new(),
-                                    }
-                                });
-
-                                if !rd.rd_type.is_empty() {
-                                    entry.detail_type = rd.rd_type.clone();
-                                }
-                                if let Some(ref id) = rd.id {
-                                    entry.id = id.clone();
-                                }
-                                if let Some(ref fmt) = rd.format {
-                                    entry.format = fmt.clone();
-                                }
-                                if let Some(ref text) = rd.text {
-                                    entry.text.push_str(text);
-                                    let _ = tx
-                                        .send(StreamEvent::ReasoningDelta {
-                                            delta: text.clone(),
-                                        })
-                                        .await;
-                                    detail_delta = true;
-                                }
-                                if let Some(ref sig) = rd.signature {
-                                    entry.signature = sig.clone();
-                                }
-                                if let Some(ref summary) = rd.summary {
-                                    entry.summary.push_str(summary);
-                                    let _ = tx
-                                        .send(StreamEvent::ReasoningDelta {
-                                            delta: summary.clone(),
-                                        })
-                                        .await;
-                                    detail_delta = true;
-                                }
-                                if let Some(ref d) = rd.data {
-                                    entry.data = d.clone();
-                                }
-                            }
+                            detail_delta = merge_reasoning_details(
+                                &mut reasoning_details,
+                                &mut reasoning_detail_order,
+                                rd_list,
+                                &tx,
+                            )
+                            .await;
                         }
 
                         if !detail_delta {
@@ -608,29 +680,7 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
                         }
 
                         if let Some(tc_list) = &delta.tool_calls {
-                            for tc in tc_list {
-                                let idx = tc.index.unwrap_or(0);
-                                let entry =
-                                    tool_calls.entry(idx).or_insert_with(|| StreamToolCall {
-                                        id: String::new(),
-                                        name: String::new(),
-                                        arguments: String::new(),
-                                    });
-
-                                if let Some(ref id) = tc.id {
-                                    if !id.is_empty() {
-                                        entry.id = id.clone();
-                                    }
-                                }
-                                if let Some(ref func) = tc.function {
-                                    if let Some(ref name) = func.name {
-                                        entry.name = name.clone();
-                                    }
-                                    if let Some(ref args) = func.arguments {
-                                        entry.arguments.push_str(args);
-                                    }
-                                }
-                            }
+                            merge_tool_call_deltas(&mut tool_calls, tc_list);
                         }
                     }
                 }
@@ -638,7 +688,6 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
         }
     }
 
-    // Emit accumulated tool calls (in index order for deterministic output)
     let mut tc_keys: Vec<&i32> = tool_calls.keys().collect();
     tc_keys.sort();
     for k in tc_keys {

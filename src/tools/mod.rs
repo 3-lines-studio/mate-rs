@@ -43,6 +43,14 @@ impl Registry {
         }
     }
 
+    pub fn standard() -> Self {
+        let mut reg = Self::new();
+        for t in standard() {
+            let _ = reg.register(t);
+        }
+        reg
+    }
+
     pub fn register(&mut self, tool: Tool) -> Result<(), String> {
         if self.tools.contains_key(&tool.name) {
             return Err(format!("tool {:?} already registered", tool.name));
@@ -84,36 +92,20 @@ impl Default for Registry {
     }
 }
 
-static CATALOG: once_cell::sync::OnceCell<std::sync::Mutex<HashMap<String, Tool>>> =
-    once_cell::sync::OnceCell::new();
-
-fn catalog() -> &'static std::sync::Mutex<HashMap<String, Tool>> {
-    CATALOG.get_or_init(|| {
-        let mut map = HashMap::new();
-        for t in standard() {
-            map.insert(t.name.clone(), t);
-        }
-        let wf = webfetch::tool();
-        map.insert(wf.name.clone(), wf);
-        std::sync::Mutex::new(map)
-    })
-}
-
-pub fn register(name: &str, tool: Tool) {
-    let mut cat = catalog().lock().unwrap();
-    cat.insert(name.to_string(), tool);
-}
-
-pub fn lookup(name: &str) -> Option<Tool> {
-    let cat = catalog().lock().unwrap();
-    cat.get(name).cloned()
-}
-
-pub fn catalog_names() -> Vec<String> {
-    let cat = catalog().lock().unwrap();
-    let mut names: Vec<String> = cat.keys().cloned().collect();
-    names.sort();
-    names
+pub(crate) fn object_schema(
+    props: &[(&str, serde_json::Value)],
+    required: &[&str],
+) -> std::collections::HashMap<String, serde_json::Value> {
+    let mut map: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    map.insert("type".to_string(), serde_json::json!("object"));
+    let mut properties = std::collections::HashMap::new();
+    for (k, v) in props {
+        properties.insert(k.to_string(), v.clone());
+    }
+    map.insert("properties".to_string(), serde_json::json!(properties));
+    map.insert("required".to_string(), serde_json::json!(required));
+    map
 }
 
 pub fn standard() -> Vec<Tool> {
@@ -125,6 +117,7 @@ pub fn standard() -> Vec<Tool> {
         grep::tool(),
         glob::tool(),
         index::symbols_tool(),
+        webfetch::tool(),
     ]
 }
 
@@ -304,7 +297,7 @@ mod tests {
     #[test]
     fn test_standard() {
         let tools = standard();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         for n in &[
             "bash",
@@ -314,6 +307,7 @@ mod tests {
             "grep",
             "glob",
             "symbols",
+            "web_fetch",
         ] {
             assert!(names.contains(n), "missing {}", n);
         }
@@ -376,38 +370,35 @@ mod tests {
     }
 
     #[test]
-    fn test_catalog_lookup() {
+    fn test_registry_lookup() {
+        let mut r = Registry::new();
         let tool = Tool {
-            name: "cat_test".to_string(),
-            description: "catalog test".to_string(),
+            name: "reg_test".to_string(),
+            description: "registry test".to_string(),
             parameters: HashMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("found".to_string()) })),
         };
-        register("cat_test", tool);
-        let found = lookup("cat_test");
+        let _ = r.register(tool);
+        let found = r.get("reg_test");
         assert!(found.is_some());
         let t = found.unwrap();
-        assert_eq!(t.name, "cat_test");
-        assert_eq!(t.description, "catalog test");
+        assert_eq!(t.name, "reg_test");
+        assert_eq!(t.description, "registry test");
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on((t.execute)(serde_json::json!({})));
         assert_eq!(result.unwrap(), "found");
     }
 
     #[test]
-    fn test_catalog_lookup_missing() {
-        assert!(lookup("nonexistent_tool_xyz").is_none());
+    fn test_registry_lookup_missing() {
+        let r = Registry::new();
+        assert!(r.get("nonexistent_tool_xyz").is_none());
     }
 
     #[test]
-    fn test_catalog_names() {
-        let names = catalog_names();
-        assert!(names.contains(&"cat_test".to_string()));
-    }
-
-    #[test]
-    fn test_standard_tools_in_catalog() {
-        let names = catalog_names();
+    fn test_standard_registry() {
+        let r = Registry::standard();
+        let names = r.names();
         for n in &[
             "bash",
             "read_file",
@@ -415,11 +406,12 @@ mod tests {
             "edit_file",
             "grep",
             "glob",
+            "symbols",
             "web_fetch",
         ] {
             assert!(
                 names.contains(&n.to_string()),
-                "standard tool {:?} missing from catalog: {:?}",
+                "standard tool {:?} missing from registry: {:?}",
                 n,
                 names
             );

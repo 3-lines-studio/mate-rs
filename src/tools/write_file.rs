@@ -1,7 +1,6 @@
 use crate::tools::define_tool;
 use crate::tools::Tool;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Deserialize)]
@@ -11,21 +10,18 @@ pub struct WriteFileParams {
 }
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "path".to_string(),
-        serde_json::json!({"type": "string", "description": "Path to the file to write (relative or absolute)"}),
-    );
-    properties.insert(
-        "content".to_string(),
-        serde_json::json!({"type": "string", "description": "Content to write to the file"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert(
-        "required".to_string(),
-        serde_json::json!(["path", "content"]),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "path",
+                serde_json::json!({"type": "string", "description": "Path to the file to write (relative or absolute)"}),
+            ),
+            (
+                "content",
+                serde_json::json!({"type": "string", "description": "Content to write to the file"}),
+            ),
+        ],
+        &["path", "content"],
     );
 
     define_tool(

@@ -2,7 +2,6 @@ use crate::tools::define_tool;
 use crate::tools::gitignore::{parse_gitignore, walk_files};
 use crate::tools::Tool;
 use serde::Deserialize;
-use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
 pub struct GlobParams {
@@ -14,23 +13,23 @@ pub struct GlobParams {
 }
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "pattern".to_string(),
-        serde_json::json!({"type": "string", "description": "Glob pattern, e.g. \"**/*.go\", \"src/*_test.go\", \"*.md\""}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "pattern",
+                serde_json::json!({"type": "string", "description": "Glob pattern, e.g. \"**/*.go\", \"src/*_test.go\", \"*.md\""}),
+            ),
+            (
+                "path",
+                serde_json::json!({"type": "string", "description": "Root directory to search from (default: current working directory)"}),
+            ),
+            (
+                "max_results",
+                serde_json::json!({"type": "integer", "description": "Maximum results (default: 50)"}),
+            ),
+        ],
+        &["pattern"],
     );
-    properties.insert(
-        "path".to_string(),
-        serde_json::json!({"type": "string", "description": "Root directory to search from (default: current working directory)"}),
-    );
-    properties.insert(
-        "max_results".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum results (default: 50)"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["pattern"]));
 
     define_tool(
         "glob",

@@ -249,7 +249,7 @@ impl ChatScreen {
     }
 }
 
-pub(super) fn shorten_cwd_string(cwd: &str) -> String {
+pub(crate) fn shorten_cwd_string(cwd: &str) -> String {
     if let Some(home) = std::env::var_os("HOME") {
         let home = home.to_string_lossy();
         if cwd.starts_with(&*home) {
@@ -259,7 +259,7 @@ pub(super) fn shorten_cwd_string(cwd: &str) -> String {
     cwd.to_string()
 }
 
-pub(super) fn fmt_tokens(n: i32) -> String {
+pub(crate) fn fmt_tokens(n: i32) -> String {
     let n = n as f64;
     if n >= 1_000_000.0 {
         format!("{:.1}M", n / 1_000_000.0)
@@ -300,6 +300,14 @@ mod tests {
         let backend = TestBackend::new(w, h);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| screen.render(f)).unwrap();
+    }
+
+    #[test]
+    fn test_format_tokens() {
+        assert_eq!(fmt_tokens(500), "500");
+        assert_eq!(fmt_tokens(1500), "1.5k");
+        assert_eq!(fmt_tokens(2_000_000), "2.0M");
+        assert_eq!(fmt_tokens(1_000_000), "1.0M");
     }
 
     #[test]

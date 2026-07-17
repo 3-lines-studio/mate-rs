@@ -1,3 +1,4 @@
+use crate::render::block::hex_to_rgb;
 use crate::render::theme::VESPER;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{
@@ -10,17 +11,8 @@ use once_cell::sync::Lazy;
 
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
 
-fn hex_rgb(hex: &str) -> (u8, u8, u8) {
-    let h = hex.trim_start_matches('#');
-    (
-        u8::from_str_radix(&h[0..2], 16).unwrap_or(0),
-        u8::from_str_radix(&h[2..4], 16).unwrap_or(0),
-        u8::from_str_radix(&h[4..6], 16).unwrap_or(0),
-    )
-}
-
 fn sc(hex: &str) -> SyntectColor {
-    let (r, g, b) = hex_rgb(hex);
+    let (r, g, b) = hex_to_rgb(hex);
     SyntectColor { r, g, b, a: 0xFF }
 }
 

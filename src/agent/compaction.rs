@@ -12,7 +12,7 @@ impl super::AgentSession {
 
         let ctx_window = self.client.context_window();
         let above_threshold = force
-            || self.counters.last_total_tokens
+            || self.sess.context_tokens
                 > ctx_window * super::COMPACTION_THRESHOLD_NUM / super::COMPACTION_THRESHOLD_DEN;
         let keep_turns = compute_keep_turns(turns, ctx_window);
 

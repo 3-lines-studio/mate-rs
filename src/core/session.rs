@@ -1,29 +1,59 @@
-use crate::agent::AgentSession;
+use crate::agent::{AgentSession, SubagentDef};
 use crate::provider::Client;
+use crate::session::store::Store;
 use crate::session::{Cache, KeyStore, Session};
+use crate::tools::Registry;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::session_manager::SessionManager;
 use super::Deps;
 
+struct SessionParts {
+    store: Store,
+    registry: Arc<Registry>,
+    system_prompt: String,
+    max_rounds: i32,
+    cwd: String,
+    subagents: HashMap<String, SubagentDef>,
+    compaction_client: Option<Client>,
+}
+
 impl Deps {
+    fn session_parts(&self) -> SessionParts {
+        SessionParts {
+            store: self.store.clone(),
+            registry: self.registry.clone(),
+            system_prompt: self.system_prompt.clone(),
+            max_rounds: self.max_rounds,
+            cwd: self.cwd.clone(),
+            subagents: self.subagents.clone(),
+            compaction_client: self.compaction_client.clone(),
+        }
+    }
+
     pub fn new_session(&self, sess: Session) -> AgentSession {
         self.new_session_with_client(sess, &self.client)
     }
 
     pub fn new_session_with_client(&self, sess: Session, client: &Client) -> AgentSession {
+        let parts = self.session_parts();
+        Self::build_session(&parts, sess, client)
+    }
+
+    fn build_session(parts: &SessionParts, sess: Session, client: &Client) -> AgentSession {
         let mut asession = AgentSession::new(
-            Arc::new(TokioMutex::new(self.store.clone())),
+            Arc::new(TokioMutex::new(parts.store.clone())),
             sess,
             Arc::new(client.clone()),
-            self.registry.clone(),
-            self.system_prompt.clone(),
-            self.max_rounds,
-            self.cwd.clone(),
+            parts.registry.clone(),
+            parts.system_prompt.clone(),
+            parts.max_rounds,
+            parts.cwd.clone(),
         );
-        asession.set_subagents(self.subagents.clone());
-        if let Some(ref cc) = self.compaction_client {
+        asession.set_subagents(parts.subagents.clone());
+        if let Some(cc) = &parts.compaction_client {
             asession.set_compaction_client(Arc::new(cc.clone()));
         }
         asession
@@ -35,30 +65,9 @@ impl Deps {
     ) -> Result<SessionManager, Box<dyn std::error::Error + Send + Sync>> {
         let ks = KeyStore::new(key_store_path)?;
         let cache = Cache::new(50);
-        let store = self.store.clone();
+        let parts = self.session_parts();
         let client = self.client.clone();
-        let registry = self.registry.clone();
-        let system_prompt = self.system_prompt.clone();
-        let max_rounds = self.max_rounds;
-        let cwd = self.cwd.clone();
-        let compaction_client = self.compaction_client.clone();
-        let subagents = self.subagents.clone();
-        let factory = Box::new(move |sess: Session| {
-            let mut asession = AgentSession::new(
-                Arc::new(TokioMutex::new(store.clone())),
-                sess,
-                Arc::new(client.clone()),
-                registry.clone(),
-                system_prompt.clone(),
-                max_rounds,
-                cwd.clone(),
-            );
-            asession.set_subagents(subagents.clone());
-            if let Some(ref cc) = compaction_client {
-                asession.set_compaction_client(Arc::new(cc.clone()));
-            }
-            asession
-        });
+        let factory = Box::new(move |sess: Session| Deps::build_session(&parts, sess, &client));
         Ok(SessionManager::new(self.store.clone(), cache, ks, factory))
     }
 }

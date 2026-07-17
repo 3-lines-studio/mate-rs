@@ -1,7 +1,7 @@
 use crate::agent;
 use crate::config::{Config, ModelConfig, ProviderConfig};
 use crate::provider::{Client, ModelProfile, ProviderPreferences};
-use crate::tools::{lookup, Registry};
+use crate::tools::Registry;
 use std::collections::HashMap;
 
 pub fn resolve_client(
@@ -88,10 +88,11 @@ pub fn resolve_subagents(
                 }
             };
 
+        let std = Registry::standard();
         let mut reg = Registry::new();
         for name in &sc.tools {
-            if let Some(t) = lookup(name) {
-                let _ = reg.register(t);
+            if let Some(t) = std.get(name) {
+                let _ = reg.register(t.clone());
             }
         }
 

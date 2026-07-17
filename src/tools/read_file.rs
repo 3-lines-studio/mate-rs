@@ -1,7 +1,6 @@
 use crate::tools::define_tool;
 use crate::tools::Tool;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::io::BufRead;
 
 #[derive(Debug, Deserialize)]
@@ -17,23 +16,23 @@ pub struct ReadFileParams {
 const DEFAULT_READ_LIMIT: i32 = 500;
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "path".to_string(),
-        serde_json::json!({"type": "string", "description": "Path to the file to read (relative or absolute)"}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "path",
+                serde_json::json!({"type": "string", "description": "Path to the file to read (relative or absolute)"}),
+            ),
+            (
+                "offset",
+                serde_json::json!({"type": "integer", "description": "Line number to start reading from (1-indexed)"}),
+            ),
+            (
+                "limit",
+                serde_json::json!({"type": "integer", "description": "Maximum number of lines to read"}),
+            ),
+        ],
+        &["path"],
     );
-    properties.insert(
-        "offset".to_string(),
-        serde_json::json!({"type": "integer", "description": "Line number to start reading from (1-indexed)"}),
-    );
-    properties.insert(
-        "limit".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum number of lines to read"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["path"]));
 
     define_tool(
         "read_file",

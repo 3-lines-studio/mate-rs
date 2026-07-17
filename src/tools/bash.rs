@@ -1,7 +1,6 @@
 use crate::tools::define_tool;
 use crate::tools::Tool;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::process::Stdio;
 
 #[cfg(unix)]
@@ -18,23 +17,19 @@ pub struct BashParams {
 }
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "command".to_string(),
-        serde_json::json!({"type": "string", "description": "The shell command to execute"}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "command",
+                serde_json::json!({"type": "string", "description": "The shell command to execute"}),
+            ),
+            (
+                "max_lines",
+                serde_json::json!({"type": "integer", "description": "Maximum lines to return from the end of output (default: 500)"}),
+            ),
+        ],
+        &["command"],
     );
-    properties.insert(
-        "description".to_string(),
-        serde_json::json!({"type": "string", "description": "Brief description of what this command does"}),
-    );
-    properties.insert(
-        "max_lines".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum lines to return from the end of output (default: 500)"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["command"]));
 
     define_tool(
         "bash",

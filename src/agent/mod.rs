@@ -8,6 +8,47 @@ mod types;
 
 pub use types::{Event, EventKind, SubagentDef};
 
+pub enum StdioEvent {
+    Handled,
+    ToolError { name: String, error: String },
+    Error(String),
+    AgentDone,
+}
+
+pub fn print_event(ev: &Event, print_tools: bool) -> StdioEvent {
+    match &ev.kind {
+        EventKind::TextDelta(delta) => {
+            print!("{}", delta);
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            StdioEvent::Handled
+        }
+        EventKind::ToolCallStart { name, .. } if print_tools => {
+            println!("\n[{}()]", name);
+            StdioEvent::Handled
+        }
+        EventKind::ToolResult { result, .. } if print_tools => {
+            let lines: Vec<&str> = result.lines().collect();
+            if lines.len() > 10 {
+                for l in &lines[..10] {
+                    println!("{}", l);
+                }
+                println!("... ({} lines total)", lines.len());
+            } else {
+                println!("{}", result);
+            }
+            StdioEvent::Handled
+        }
+        EventKind::ToolError { name, error, .. } => StdioEvent::ToolError {
+            name: name.clone(),
+            error: error.clone(),
+        },
+        EventKind::Error(msg) => StdioEvent::Error(msg.clone()),
+        EventKind::AgentDone(_) => StdioEvent::AgentDone,
+        _ => StdioEvent::Handled,
+    }
+}
+
 use crate::message::{Message, ToolDef};
 use crate::provider::ChatClient;
 use crate::session::store::Store;
@@ -41,7 +82,6 @@ pub struct AgentSession {
     max_rounds: i32,
     cwd: String,
 
-    counters: types::UsageCounters,
     cached_tool_defs: Vec<ToolDef>,
 
     working_messages: Vec<Message>,
@@ -95,10 +135,6 @@ impl AgentSession {
         let date_str = now.format("%Y-%m-%d (%A)").to_string();
         let system_msg = format!("CWD: {}\nDate: {}\n\n{}", cwd, date_str, system_prompt);
         let cached_tool_defs = registry.tool_defs();
-        let prompt_tokens = sess.prompt_tokens;
-        let completion_tokens = sess.completion_tokens;
-        let cost = sess.cost;
-        let context_tokens = sess.context_tokens;
         let compacted_summary = sess.compacted_summary.clone();
         let compacted_up_to = sess.compacted_up_to.clone();
 
@@ -110,13 +146,6 @@ impl AgentSession {
             system_msg,
             max_rounds,
             cwd,
-            counters: types::UsageCounters {
-                total_prompt_tokens: prompt_tokens,
-                total_completion_tokens: completion_tokens,
-                total_cost: cost,
-                last_request_tokens: 0,
-                last_total_tokens: context_tokens,
-            },
             cached_tool_defs,
             working_messages: Vec::new(),
             compaction: types::CompactionState {
@@ -166,13 +195,6 @@ impl AgentSession {
             system_msg,
             max_rounds,
             cwd,
-            counters: types::UsageCounters {
-                total_prompt_tokens: 0,
-                total_completion_tokens: 0,
-                total_cost: 0.0,
-                last_request_tokens: 0,
-                last_total_tokens: 0,
-            },
             cached_tool_defs: def.registry.tool_defs(),
             working_messages: Vec::new(),
             compaction: types::CompactionState {
@@ -194,10 +216,6 @@ impl AgentSession {
         self.sess.clone()
     }
     pub fn reload_from(&mut self, sess: Session) {
-        self.counters.total_prompt_tokens = sess.prompt_tokens;
-        self.counters.total_completion_tokens = sess.completion_tokens;
-        self.counters.total_cost = sess.cost;
-        self.counters.last_total_tokens = sess.context_tokens;
         self.compaction.compacted_summary = sess.compacted_summary.clone();
         self.compaction.compacted_up_to = sess.compacted_up_to.clone();
         self.sess = sess;
@@ -209,7 +227,7 @@ impl AgentSession {
         self.client.context_window()
     }
     pub fn context_tokens(&self) -> i32 {
-        self.counters.last_total_tokens
+        self.sess.context_tokens
     }
     pub fn tool_defs(&self) -> Vec<ToolDef> {
         self.cached_tool_defs.clone()

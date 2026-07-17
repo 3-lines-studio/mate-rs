@@ -63,22 +63,22 @@ pub fn init_with_config(
         system_prompt
     };
 
-    let mut registry = tools::Registry::new();
-    let tool_list = if cfg.agent.tools.is_empty() {
-        tools::catalog_names()
+    let standard = tools::Registry::standard();
+    let registry = if cfg.agent.tools.is_empty() {
+        standard
     } else {
-        cfg.agent.tools.clone()
-    };
-
-    for name in &tool_list {
-        if let Some(t) = tools::lookup(name) {
-            if let Err(e) = registry.register(t) {
-                log::warn!("registering tool tool={}: {}", name, e);
+        let mut reg = tools::Registry::new();
+        for name in &cfg.agent.tools {
+            if let Some(t) = standard.get(name) {
+                if let Err(e) = reg.register(t.clone()) {
+                    log::warn!("registering tool tool={}: {}", name, e);
+                }
+            } else {
+                log::warn!("unknown tool in config tool={}", name);
             }
-        } else {
-            log::warn!("unknown tool in config tool={}", name);
         }
-    }
+        reg
+    };
 
     let subagents = resolve_subagents(&cfg, "", "", "", verbose);
     let max_rounds = cfg.agent.max_tool_rounds;

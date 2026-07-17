@@ -91,18 +91,6 @@ impl Event {
             subagent_id: String::new(),
         }
     }
-    pub fn tool_error_deferred(tc: &StreamToolCall, msg: &str) -> Self {
-        Event {
-            kind: EventKind::ToolError {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                error: msg.into(),
-                duration: String::new(),
-            },
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
-    }
     pub fn error_msg(msg: &str) -> Self {
         Event {
             kind: EventKind::Error(msg.into()),
@@ -171,15 +159,6 @@ pub(super) struct RoundResult {
     pub reasoning_details: Vec<ReasoningDetail>,
     pub tool_calls: Vec<StreamToolCall>,
     pub finish_reason: String,
-}
-
-#[derive(Clone)]
-pub(super) struct UsageCounters {
-    pub total_prompt_tokens: i32,
-    pub total_completion_tokens: i32,
-    pub total_cost: f64,
-    pub last_request_tokens: i32,
-    pub last_total_tokens: i32,
 }
 
 #[derive(Clone)]

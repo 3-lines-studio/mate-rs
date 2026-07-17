@@ -1,6 +1,6 @@
 use super::format::format_duration;
 use super::types::{DelegateData, Event, EventKind, PendingTool, SubagentDef, SubagentTurn};
-use crate::message::{Message, Role, ToolCall, ToolCallFunction, ToolDef};
+use crate::message::{Message, Role, ToolCall, ToolDef};
 use crate::provider::StreamToolCall;
 use crate::session::store::Store;
 use serde::Deserialize;
@@ -122,9 +122,9 @@ impl super::AgentSession {
                     ));
                 }
                 if let Some(dd) = delegate_data {
-                    self.counters.total_prompt_tokens += dd.prompt_tokens;
-                    self.counters.total_completion_tokens += dd.completion_tokens;
-                    self.counters.total_cost += dd.cost;
+                    self.sess.prompt_tokens += dd.prompt_tokens;
+                    self.sess.completion_tokens += dd.completion_tokens;
+                    self.sess.cost += dd.cost;
                     self.subagents_state.subagent_turns.push(SubagentTurn {
                         msgs: dd.msgs,
                         subagent: dd.subagent_id,
@@ -147,17 +147,8 @@ impl super::AgentSession {
         reasoning: &str,
         details: &[crate::message::ReasoningDetail],
     ) {
-        let assistant_tool_calls: Vec<ToolCall> = pending
-            .iter()
-            .map(|pt| ToolCall {
-                id: pt.call.id.clone(),
-                call_type: "function".into(),
-                function: ToolCallFunction {
-                    name: pt.call.name.clone(),
-                    arguments: pt.call.arguments.clone(),
-                },
-            })
-            .collect();
+        let assistant_tool_calls: Vec<ToolCall> =
+            pending.iter().map(|pt| pt.call.clone().into()).collect();
 
         self.working_messages.push(Message {
             role: Role::Assistant,
@@ -257,9 +248,9 @@ fn run_delegate(
         let join_handle = tokio::spawn(async move {
             sub.run_loop(&task_text, &event_tx).await;
             (
-                sub.counters.total_prompt_tokens,
-                sub.counters.total_completion_tokens,
-                sub.counters.total_cost,
+                sub.sess.prompt_tokens,
+                sub.sess.completion_tokens,
+                sub.sess.cost,
                 sub.captured_msgs,
                 sub.working_messages,
             )

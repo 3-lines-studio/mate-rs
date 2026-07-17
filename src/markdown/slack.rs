@@ -1,29 +1,17 @@
+use super::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 
-static RE_CODE_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)```[\s\S]*?```").unwrap());
-static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`[^`\n]+`").unwrap());
 static RE_TABLE_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)(^\|.+\|\s*$\n?)+").unwrap());
 static RE_TABLE_SEP: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\|[\s\-:|]+\|$").unwrap());
-static RE_HEADING: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^#{1,6}\s+(.+)$").unwrap());
-static RE_BOLD1: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
-static RE_BOLD2: Lazy<Regex> = Lazy::new(|| Regex::new(r"__(.+?)__").unwrap());
-static RE_ITALIC: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*(.+?)\*").unwrap());
-static RE_STRIKE: Lazy<Regex> = Lazy::new(|| Regex::new(r"~~(.+?)~~").unwrap());
 static RE_IMAGE: Lazy<Regex> = Lazy::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
-static RE_LINK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
-static RE_LIST: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^(\s*)[-*]\s+").unwrap());
 static RE_HR: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^(-{3,}|\*{3,}|_{3,})$").unwrap());
 static RE_CODE_LANG: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)^```[a-zA-Z0-9_+-]*\s*\n").unwrap());
-static RE_MULTI_NL: Lazy<Regex> = Lazy::new(|| Regex::new(r"\n{3,}").unwrap());
 
 const P_CODE_BLOCK: &str = "\u{00a7}CB_";
 const P_INLINE_CODE: &str = "\u{00a7}IC_";
-const P_BOLD_S: &str = "\u{00a7}BS\u{00a7}";
-const P_BOLD_E: &str = "\u{00a7}BE\u{00a7}";
-const P_SUFFIX: &str = "\u{00a7}";
 
 static RE_INLINE_CODE_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
     let pat = format!(
@@ -35,43 +23,27 @@ static RE_INLINE_CODE_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&pat).unwrap()
 });
 
-static RE_BOLD_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
-    let pat = format!(
-        "{}{}{}",
-        regex::escape(P_BOLD_S),
-        r"(.+?)",
-        regex::escape(P_BOLD_E)
-    );
-    Regex::new(&pat).unwrap()
-});
-
 pub fn markdown_to_slack(text: &str) -> String {
-    if text.is_empty() {
-        return text.to_string();
-    }
+    markdown_to_platform(
+        text,
+        P_CODE_BLOCK,
+        P_INLINE_CODE,
+        slack_pre_heading,
+        slack_phase1,
+        slack_phase2,
+        slack_clean_cb,
+    )
+}
 
-    let mut code_blocks: Vec<String> = Vec::new();
-    let mut inline_codes: Vec<String> = Vec::new();
+fn slack_pre_heading(
+    text: &str,
+    code_blocks: &mut Vec<String>,
+    inline_codes: &mut [String],
+) -> (String, HashMap<usize, bool>) {
     let mut resolved_inlines: HashMap<usize, bool> = HashMap::new();
 
-    let mut text = RE_CODE_BLOCK
+    let text = RE_TABLE_BLOCK
         .replace_all(text, |caps: &regex::Captures| {
-            let idx = code_blocks.len();
-            code_blocks.push(caps[0].to_string());
-            format!("{}{}{}", P_CODE_BLOCK, idx, P_SUFFIX)
-        })
-        .to_string();
-
-    text = RE_INLINE_CODE
-        .replace_all(&text, |caps: &regex::Captures| {
-            let idx = inline_codes.len();
-            inline_codes.push(caps[0].to_string());
-            format!("{}{}{}", P_INLINE_CODE, idx, P_SUFFIX)
-        })
-        .to_string();
-
-    text = RE_TABLE_BLOCK
-        .replace_all(&text, |caps: &regex::Captures| {
             let table_block = caps[0].to_string();
             let lines: Vec<&str> = table_block.trim().lines().collect();
             let data_lines: Vec<&str> = lines
@@ -147,66 +119,26 @@ pub fn markdown_to_slack(text: &str) -> String {
         })
         .to_string();
 
-    text = RE_HEADING
-        .replace_all(&text, |caps: &regex::Captures| {
-            let content = caps[1].to_string();
-            let content = strip_formatting(&content);
-            format!("{}{}{}", P_BOLD_S, content, P_BOLD_E)
-        })
-        .to_string();
+    (text, resolved_inlines)
+}
 
-    text = RE_BOLD1
-        .replace_all(&text, |caps: &regex::Captures| {
-            format!("{}{}{}", P_BOLD_S, &caps[1], P_BOLD_E)
-        })
-        .to_string();
-    text = RE_BOLD2
-        .replace_all(&text, |caps: &regex::Captures| {
-            format!("{}{}{}", P_BOLD_S, &caps[1], P_BOLD_E)
-        })
-        .to_string();
-
-    text = RE_ITALIC.replace_all(&text, "_${1}_").to_string();
-
-    text = RE_BOLD_PLACEHOLDER.replace_all(&text, "*${1}*").to_string();
-
+fn slack_phase1(text: &str) -> String {
+    let mut text = RE_ITALIC.replace_all(text, "_${1}_").to_string();
     text = RE_STRIKE.replace_all(&text, "~${1}~").to_string();
-
     text = RE_IMAGE.replace_all(&text, "<${2}|${1}>").to_string();
-
     text = RE_LINK.replace_all(&text, "<${2}|${1}>").to_string();
-
-    text = RE_LIST.replace_all(&text, "${1}\u{2022}  ").to_string();
-
     text = RE_HR
         .replace_all(&text, "\u{2014}\u{2014}\u{2014}")
         .to_string();
-
-    for (i, block) in code_blocks.iter().enumerate() {
-        let cleaned = RE_CODE_LANG.replace_all(block, "```\n");
-        let placeholder = format!("{}{}{}", P_CODE_BLOCK, i, P_SUFFIX);
-        text = text.replace(&placeholder, &format!("\n{}\n", cleaned));
-    }
-
-    for (i, code) in inline_codes.iter().enumerate() {
-        if !resolved_inlines.contains_key(&i) {
-            let placeholder = format!("{}{}{}", P_INLINE_CODE, i, P_SUFFIX);
-            text = text.replace(&placeholder, code);
-        }
-    }
-
-    text = RE_MULTI_NL.replace_all(&text, "\n\n").to_string();
-
-    text = text.trim_start_matches('\n').to_string();
-    text = text.trim_end_matches('\n').to_string();
-
     text
 }
 
-fn strip_formatting(s: &str) -> String {
-    let s = RE_BOLD1.replace_all(s, "$1").to_string();
-    let s = RE_BOLD2.replace_all(&s, "$1").to_string();
-    RE_ITALIC.replace_all(&s, "$1").to_string()
+fn slack_phase2(text: &str) -> String {
+    RE_BOLD_PLACEHOLDER.replace_all(text, "*${1}*").to_string()
+}
+
+fn slack_clean_cb(block: &str) -> String {
+    RE_CODE_LANG.replace_all(block, "```\n").to_string()
 }
 
 fn parse_placeholder_idx(s: &str, prefix: &str) -> isize {

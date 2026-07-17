@@ -3,7 +3,6 @@ use crate::tools::gitignore::{parse_gitignore, walk_files};
 use crate::tools::Tool;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::Path;
 
@@ -24,31 +23,31 @@ const MAX_LINE_LENGTH: usize = 64 * 1024;
 const MAX_MATCHES_PER_FILE: i32 = 1000;
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "pattern".to_string(),
-        serde_json::json!({"type": "string", "description": "Text or regex pattern to search for"}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "pattern",
+                serde_json::json!({"type": "string", "description": "Text or regex pattern to search for"}),
+            ),
+            (
+                "path",
+                serde_json::json!({"type": "string", "description": "File or directory to search in (default: current working directory)"}),
+            ),
+            (
+                "glob",
+                serde_json::json!({"type": "string", "description": "Filter file names, e.g. \"*.go\", \"*_test.go\""}),
+            ),
+            (
+                "max_results",
+                serde_json::json!({"type": "integer", "description": "Maximum matches to return (default: 30)"}),
+            ),
+            (
+                "regex",
+                serde_json::json!({"type": "boolean", "description": "Treat pattern as regex (default: false, literal match)"}),
+            ),
+        ],
+        &["pattern"],
     );
-    properties.insert(
-        "path".to_string(),
-        serde_json::json!({"type": "string", "description": "File or directory to search in (default: current working directory)"}),
-    );
-    properties.insert(
-        "glob".to_string(),
-        serde_json::json!({"type": "string", "description": "Filter file names, e.g. \"*.go\", \"*_test.go\""}),
-    );
-    properties.insert(
-        "max_results".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum matches to return (default: 30)"}),
-    );
-    properties.insert(
-        "regex".to_string(),
-        serde_json::json!({"type": "boolean", "description": "Treat pattern as regex (default: false, literal match)"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["pattern"]));
 
     define_tool(
         "grep",

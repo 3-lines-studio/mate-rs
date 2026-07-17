@@ -28,19 +28,19 @@ static DNS_CACHE: once_cell::sync::Lazy<RwLock<HashMap<String, DnsCacheEntry>>> 
     once_cell::sync::Lazy::new(|| RwLock::new(HashMap::new()));
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "url".to_string(),
-        serde_json::json!({"type": "string", "description": "URL to fetch (https:// or http://)"}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "url",
+                serde_json::json!({"type": "string", "description": "URL to fetch (https:// or http://)"}),
+            ),
+            (
+                "max_size",
+                serde_json::json!({"type": "integer", "description": "Maximum bytes to return (default: 100000, max: 200000)"}),
+            ),
+        ],
+        &["url"],
     );
-    properties.insert(
-        "max_size".to_string(),
-        serde_json::json!({"type": "integer", "description": "Maximum bytes to return (default: 100000, max: 200000)"}),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["url"]));
 
     define_tool(
         "web_fetch",

@@ -133,23 +133,18 @@ fn run_cmd(args: &[String]) {
 
     let mut events = asession.prompt(&final_prompt);
     while let Some(ev) = rt.block_on(events.recv()) {
-        match ev.kind {
-            mate::agent::EventKind::TextDelta(delta) => {
-                print!("{}", delta);
-                use std::io::Write;
-                let _ = std::io::stdout().flush();
-            }
-            mate::agent::EventKind::ToolError { name, error, .. } => {
+        match mate::agent::print_event(&ev, false) {
+            mate::agent::StdioEvent::Handled => {}
+            mate::agent::StdioEvent::ToolError { name, error } => {
                 eprintln!("❌ {}: {}", name, error);
             }
-            mate::agent::EventKind::Error(msg) => {
+            mate::agent::StdioEvent::Error(msg) => {
                 eprintln!("Error: {}", msg);
                 std::process::exit(1);
             }
-            mate::agent::EventKind::AgentDone(_) => {
+            mate::agent::StdioEvent::AgentDone => {
                 println!();
             }
-            _ => {}
         }
     }
 }

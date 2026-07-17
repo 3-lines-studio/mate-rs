@@ -48,20 +48,10 @@ fn test_client_pricing() {
         "m",
         "k",
         ModelProfile {
-            context_window: 0,
-            max_output_tokens: 0,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
             input_price: 3.0,
             cached_input_price: 0.3,
             output_price: 15.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
     let (input, cached, output) = c.pricing();
@@ -79,18 +69,7 @@ fn test_client_model_and_context() {
         ModelProfile {
             context_window: 128000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
     assert_eq!(c.model(), "gpt-4");
@@ -117,18 +96,7 @@ async fn test_chat_request_json_shape() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -180,18 +148,7 @@ async fn test_chat_sets_stream_options() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 100,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -233,18 +190,7 @@ async fn test_chat_non_200_error() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -287,18 +233,10 @@ async fn test_chat_openrouter_reasoning_config() {
         ModelProfile {
             context_window: 128000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
             reasoning_effort: "high".to_string(),
             reasoning_max_tokens: 2000,
             open_router: true,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -342,16 +280,9 @@ async fn test_chat_non_openrouter_thinking_config() {
             max_output_tokens: 4096,
             thinking_type: "enabled".to_string(),
             reasoning_effort: "high".to_string(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
             prompt_cache: true,
             prompt_cache_ttl: "1h".to_string(),
+            ..Default::default()
         },
     );
 
@@ -396,18 +327,7 @@ async fn test_sse_text_delta() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -458,18 +378,7 @@ async fn test_sse_reasoning_content_delta() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -521,18 +430,7 @@ async fn test_sse_reasoning_delta_fallback() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -585,18 +483,7 @@ async fn test_sse_reasoning_details_prefer_over_fallback() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -650,18 +537,7 @@ async fn test_sse_tool_call_accumulation() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -716,18 +592,7 @@ async fn test_sse_tool_call_emitted_after_done_terminator() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -785,18 +650,7 @@ async fn test_sse_finish_reason() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -849,18 +703,7 @@ async fn test_sse_usage() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -913,18 +756,7 @@ async fn test_sse_usage_cached_tokens_fallback() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -979,18 +811,7 @@ async fn test_sse_usage_explicit_field_wins() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -1043,18 +864,7 @@ async fn test_sse_usage_no_cache_field() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -1107,18 +917,7 @@ async fn test_sse_reasoning_details_text_merge() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -1178,18 +977,7 @@ async fn test_sse_reasoning_details_encrypted() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -1246,18 +1034,7 @@ async fn test_sse_reasoning_details_no_index_auto_assigns() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -1308,18 +1085,7 @@ async fn test_sse_done_sentinel() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 
@@ -1364,18 +1130,7 @@ async fn test_sse_error_in_chunk() {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 4096,
-            thinking_type: String::new(),
-            reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
-            prompt_cache: false,
-            prompt_cache_ttl: String::new(),
+            ..Default::default()
         },
     );
 

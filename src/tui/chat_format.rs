@@ -1,13 +1,5 @@
 use serde_json;
 
-pub fn format_tokens(n: i32) -> String {
-    if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        format!("{}", n)
-    }
-}
-
 pub const TOOL_COLOR: &str = crate::render::theme::VESPER.accent;
 
 pub fn tool_pretty_name(name: &str) -> &str {
@@ -175,20 +167,15 @@ pub fn result_lang(tool_name: &str, args: &str) -> String {
     }
 }
 
-pub fn strip_box_drawing(s: &str) -> String {
-    s.chars()
-        .filter(|c| !('\u{2500}'..='\u{257F}').contains(c))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::chat::fmt_tokens;
 
     #[test]
     fn test_format_tokens() {
-        assert_eq!(format_tokens(500), "500");
-        assert_eq!(format_tokens(1500), "1.5k");
+        assert_eq!(fmt_tokens(500), "500");
+        assert_eq!(fmt_tokens(1500), "1.5k");
     }
 
     #[test]

@@ -288,16 +288,6 @@ pub fn git_branch(cwd: &str) -> Option<String> {
     }
 }
 
-fn shorten_cwd(cwd: &str) -> String {
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = home.to_string_lossy();
-        if cwd.starts_with(&*home) {
-            return format!("~/{}", &cwd[home.len()..]);
-        }
-    }
-    cwd.to_string()
-}
-
 pub fn render_top_bar(f: &mut Frame, area: Rect, cwd: &str, model: &str) {
     let gray = COLORS.placeholder;
     let bright = COLORS.muted;
@@ -309,7 +299,7 @@ pub fn render_top_bar(f: &mut Frame, area: Rect, cwd: &str, model: &str) {
             Style::default().fg(bright),
         ));
     }
-    let display_cwd = shorten_cwd(cwd);
+    let display_cwd = crate::tui::chat::shorten_cwd_string(cwd);
     spans.push(Span::styled(
         format!("  {display_cwd}"),
         Style::default().fg(gray),

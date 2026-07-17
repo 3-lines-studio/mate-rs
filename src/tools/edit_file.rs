@@ -1,7 +1,6 @@
 use crate::tools::define_tool;
 use crate::tools::Tool;
 use serde::Deserialize;
-use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
 pub struct EditParams {
@@ -18,29 +17,29 @@ pub struct EditOp {
 }
 
 pub fn tool() -> Tool {
-    let mut params = HashMap::new();
-    params.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties: HashMap<String, serde_json::Value> = HashMap::new();
-    properties.insert(
-        "path".to_string(),
-        serde_json::json!({"type": "string", "description": "Path to the file to edit (relative or absolute)"}),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "path",
+                serde_json::json!({"type": "string", "description": "Path to the file to edit (relative or absolute)"}),
+            ),
+            (
+                "edits",
+                serde_json::json!({
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "oldText": {"type": "string", "description": "Exact text to replace"},
+                            "newText": {"type": "string", "description": "Replacement text"}
+                        },
+                        "required": ["oldText", "newText"]
+                    }
+                }),
+            ),
+        ],
+        &["path", "edits"],
     );
-    properties.insert(
-        "edits".to_string(),
-        serde_json::json!({
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "oldText": {"type": "string", "description": "Exact text to replace"},
-                    "newText": {"type": "string", "description": "Replacement text"}
-                },
-                "required": ["oldText", "newText"]
-            }
-        }),
-    );
-    params.insert("properties".to_string(), serde_json::json!(properties));
-    params.insert("required".to_string(), serde_json::json!(["path", "edits"]));
 
     define_tool(
         "edit_file",

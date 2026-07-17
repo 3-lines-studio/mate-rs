@@ -65,7 +65,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             model: String::new(),
-            max_tool_rounds: 99,
+            max_tool_rounds: default_max_tool_rounds(),
             tools: vec![],
             interfaces: vec![],
             prompt: String::new(),
@@ -100,14 +100,17 @@ pub struct SessionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SlackConfig {
     #[serde(default)]
+    #[serde(skip_serializing)]
     pub bot_token: String,
     #[serde(default)]
+    #[serde(skip_serializing)]
     pub app_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TelegramConfig {
     #[serde(default)]
+    #[serde(skip_serializing)]
     pub bot_token: String,
     #[serde(default)]
     pub allowed_users: Vec<i64>,
@@ -236,18 +239,25 @@ impl Config {
     }
 }
 
-pub fn dir_for(name: &str) -> String {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+pub fn dir_for_env(name: &str, xdg: Option<&str>, home: &str) -> String {
+    if let Some(xdg) = xdg {
         let mut p = PathBuf::from(xdg);
         p.push(name);
         p.to_string_lossy().to_string()
     } else {
-        let home = dirs_home();
         let mut p = PathBuf::from(home);
         p.push(".config");
         p.push(name);
         p.to_string_lossy().to_string()
     }
+}
+
+pub fn dir_for(name: &str) -> String {
+    dir_for_env(
+        name,
+        std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+        &dirs_home(),
+    )
 }
 
 pub fn dir() -> String {
@@ -298,11 +308,7 @@ pub fn save_config(
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut data = load_config_map(dir)?;
-    let mut clean = config.clone();
-    clean.slack.bot_token = String::new();
-    clean.slack.app_token = String::new();
-    clean.telegram.bot_token = String::new();
-    let edited = toml::Value::try_from(&clean)?;
+    let edited = toml::Value::try_from(config)?;
     if let toml::Value::Table(mut t) = edited {
         t.remove("services");
         for (key, val) in t {
@@ -416,26 +422,26 @@ mod tests {
 
     #[test]
     fn test_dir_xdg_env() {
-        std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg");
-        assert_eq!(dir(), "/tmp/xdg/mate");
-        std::env::remove_var("XDG_CONFIG_HOME");
+        assert_eq!(
+            dir_for_env("mate", Some("/tmp/xdg"), "/tmp/home"),
+            "/tmp/xdg/mate"
+        );
     }
 
     #[test]
     fn test_dir_no_xdg() {
-        std::env::remove_var("XDG_CONFIG_HOME");
-        let got = dir();
-        let home = dirs_home();
-        let want = format!("{}/.config/mate", home);
-        assert_eq!(got, want);
+        assert_eq!(
+            dir_for_env("mate", None, "/tmp/home"),
+            "/tmp/home/.config/mate"
+        );
     }
 
     #[test]
     fn test_dir_for_custom_name() {
-        std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg");
-        let got = dir_for("alfred");
-        assert_eq!(got, "/tmp/xdg/alfred");
-        std::env::remove_var("XDG_CONFIG_HOME");
+        assert_eq!(
+            dir_for_env("alfred", Some("/tmp/xdg"), "/tmp/home"),
+            "/tmp/xdg/alfred"
+        );
     }
 
     #[test]

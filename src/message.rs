@@ -99,6 +99,19 @@ pub struct ToolCallFunction {
     pub arguments: String,
 }
 
+impl From<crate::provider::StreamToolCall> for ToolCall {
+    fn from(tc: crate::provider::StreamToolCall) -> Self {
+        ToolCall {
+            id: tc.id,
+            call_type: "function".into(),
+            function: ToolCallFunction {
+                name: tc.name,
+                arguments: tc.arguments,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolDef {
     #[serde(rename = "type")]
