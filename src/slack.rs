@@ -1,20 +1,18 @@
 use crate::core::session_manager::SessionManager;
 use crate::core::{Deps, Interface, Notifier};
-use crate::markdown::{slack::markdown_to_slack, split_text};
+use crate::integration::{self, ActivePrompt, StreamingBackend};
+use crate::markdown::slack::markdown_to_slack;
+use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
+use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 const SLACK_TEXT_LIMIT: usize = 3500;
-const FLUSH_INTERVAL: Duration = Duration::from_millis(800);
-const TRUNCATION_NOTE: &str = "\n\n> _...message continues..._";
-const PROMPT_CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
 static IMG_EXT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"[\w./\-]+\.(?:png|jpg|jpeg|gif|webp)").unwrap());
@@ -154,71 +152,126 @@ async fn update_message(
     Ok(())
 }
 
-fn flush_display(text: &str) -> String {
-    let mrkdwn = markdown_to_slack(text);
-    let chunks = split_text(&mrkdwn, SLACK_TEXT_LIMIT);
-    if chunks.is_empty() {
-        return String::new();
-    }
-    let display = &chunks[0];
-    let needs_truncation = chunks.len() > 1 || display.len() < mrkdwn.len();
-    let mut display = display.to_string();
-    if needs_truncation {
-        display.push_str(TRUNCATION_NOTE);
-    }
-    if display.len() > SLACK_TEXT_LIMIT {
-        display.truncate(SLACK_TEXT_LIMIT);
-    }
-    display
+struct SlackStreaming {
+    client: reqwest::Client,
+    bot_token: String,
+    channel: String,
+    thread_ts: String,
+    images: Mutex<Vec<String>>,
 }
 
-async fn do_flush(
+#[async_trait]
+impl StreamingBackend for SlackStreaming {
+    type MsgId = String;
+
+    fn flush_interval(&self) -> Duration {
+        Duration::from_millis(800)
+    }
+
+    fn text_limit(&self) -> usize {
+        SLACK_TEXT_LIMIT
+    }
+
+    fn markdown(&self, text: &str) -> String {
+        markdown_to_slack(text)
+    }
+
+    async fn send_thinking(&self) -> Result<String, String> {
+        post_message(
+            &self.client,
+            &self.bot_token,
+            &self.channel,
+            "...",
+            Some(&self.thread_ts),
+        )
+        .await
+    }
+
+    async fn edit_message(&self, msg_id: &String, text: &str) -> Result<(), String> {
+        update_message(&self.client, &self.bot_token, &self.channel, msg_id, text).await
+    }
+
+    async fn post_message(&self, text: &str) -> Result<String, String> {
+        post_message(
+            &self.client,
+            &self.bot_token,
+            &self.channel,
+            text,
+            Some(&self.thread_ts),
+        )
+        .await
+    }
+
+    fn on_event(&self, event: &crate::agent::Event) {
+        if let crate::agent::EventKind::ToolResult {
+            ref args,
+            ref result,
+            ..
+        } = event.kind
+        {
+            let mut images = self.images.lock().unwrap();
+            collect_images(&mut images, &[args.as_str(), result.as_str()]);
+        }
+    }
+
+    async fn after_finalize(&self) {
+        let images = self.images.lock().unwrap().clone();
+        upload_images(
+            &self.client,
+            &self.bot_token,
+            &self.channel,
+            &self.thread_ts,
+            &images,
+        )
+        .await;
+    }
+}
+
+async fn upload_images(
     client: &reqwest::Client,
     bot_token: &str,
     channel: &str,
-    msg_ts: &str,
-    text: &str,
-) {
-    let display = flush_display(text);
-    if display.is_empty() {
-        return;
-    }
-    if let Err(e) = update_message(client, bot_token, channel, msg_ts, &display).await {
-        log::error!("slack update message: {}", e);
-    }
-}
-
-async fn do_finalize(
-    client: &reqwest::Client,
-    bot_token: &str,
-    channel: &str,
-    msg_ts: &str,
     thread_ts: &str,
-    text: &str,
+    images: &[String],
 ) {
-    let mrkdwn = markdown_to_slack(text);
-    let chunks = split_text(&mrkdwn, SLACK_TEXT_LIMIT);
-    for (i, chunk) in chunks.iter().enumerate() {
-        let mut chunk = chunk.clone();
-        if chunk.len() > SLACK_TEXT_LIMIT {
-            chunk.truncate(SLACK_TEXT_LIMIT);
-        }
-        let result = if i == 0 {
-            update_message(client, bot_token, channel, msg_ts, &chunk).await
-        } else {
-            post_message(client, bot_token, channel, &chunk, Some(thread_ts))
-                .await
-                .map(|_| ())
+    for img_path in images {
+        let path = std::path::Path::new(img_path);
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
         };
-        if let Err(e) = result {
-            log::error!("slack finalize: {}", e);
+        let file_body = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        let part = reqwest::multipart::Part::bytes(file_body).file_name(filename.to_string());
+
+        let form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("channels", channel.to_string())
+            .text("thread_ts", thread_ts.to_string());
+
+        let resp = client
+            .post(api_url("files.upload"))
+            .header("Authorization", format!("Bearer {}", bot_token))
+            .multipart(form)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                let _ = std::fs::remove_file(path);
+            }
+            Ok(r) => {
+                log::error!("slack upload {}: HTTP {}", filename, r.status());
+            }
+            Err(e) => {
+                log::error!("slack upload {}: {}", filename, e);
+            }
         }
     }
-}
-
-struct ActivePrompt {
-    cancel: oneshot::Sender<()>,
-    done: oneshot::Receiver<()>,
 }
 
 fn collect_images(images: &mut Vec<String>, sources: &[&str]) {
@@ -327,183 +380,22 @@ impl BotInner {
         } else {
             event.thread_ts.clone()
         };
-        self.process_prompt(event.channel, effective.clone(), effective, event.text)
-            .await;
-    }
-
-    async fn process_prompt(
-        &self,
-        channel: String,
-        session_key: String,
-        thread_ts: String,
-        text: String,
-    ) {
-        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        let (done_tx, done_rx) = oneshot::channel::<()>();
-        tokio::pin!(cancel_rx);
-
-        let prior = self.active_prompts.lock().unwrap().remove(&session_key);
-        if let Some(prior) = prior {
-            let _ = prior.cancel.send(());
-            let _ = tokio::time::timeout(PROMPT_CANCEL_TIMEOUT, prior.done).await;
-        }
-
-        self.active_prompts.lock().unwrap().insert(
-            session_key.clone(),
-            ActivePrompt {
-                cancel: cancel_tx,
-                done: done_rx,
-            },
-        );
-
-        let msg_ts = match post_message(
-            &self.client,
-            &self.bot_token,
-            &channel,
-            "...",
-            Some(&thread_ts),
+        let backend = SlackStreaming {
+            client: self.client.clone(),
+            bot_token: self.bot_token.clone(),
+            channel: event.channel,
+            thread_ts: effective.clone(),
+            images: Mutex::new(Vec::new()),
+        };
+        integration::process_prompt(
+            &backend,
+            &self.manager,
+            &self.active_prompts,
+            effective.clone(),
+            &effective,
+            &event.text,
         )
-        .await
-        {
-            Ok(ts) => ts,
-            Err(e) => {
-                log::error!("slack post thinking: {}", e);
-                self.active_prompts.lock().unwrap().remove(&session_key);
-                let _ = done_tx.send(());
-                return;
-            }
-        };
-
-        let sess_arc = {
-            let result = {
-                let mut mgr = self.manager.lock().unwrap();
-                mgr.get_or_create(&session_key)
-            };
-            match result {
-                Ok(s) => s,
-                Err(e) => {
-                    log::error!("slack session: {}", e);
-                    let _ = do_finalize(
-                        &self.client,
-                        &self.bot_token,
-                        &channel,
-                        &msg_ts,
-                        &thread_ts,
-                        "Error interno creando sesi\u{f3}n.",
-                    )
-                    .await;
-                    self.active_prompts.lock().unwrap().remove(&session_key);
-                    let _ = done_tx.send(());
-                    return;
-                }
-            }
-        };
-
-        let mut events = {
-            let mut sess = sess_arc.lock().unwrap();
-            sess.prompt(&text)
-        };
-
-        let mut full_text = String::new();
-        let mut last_flush = Instant::now();
-        let mut images: Vec<String> = Vec::new();
-
-        loop {
-            tokio::select! {
-                ev = events.recv() => {
-                    match ev {
-                        Some(ev) => match ev.kind {
-                            crate::agent::EventKind::TextDelta(delta) => full_text.push_str(&delta),
-                            crate::agent::EventKind::Error(msg) => {
-                                full_text.push_str("\n\nError: ");
-                                full_text.push_str(&msg);
-                            }
-                            crate::agent::EventKind::ToolResult { args, result, .. } => {
-                                collect_images(&mut images, &[&args, &result]);
-                            }
-                            _ => {}
-                        },
-                        None => break,
-                    }
-                    if !full_text.is_empty() && last_flush.elapsed() >= FLUSH_INTERVAL {
-                        do_flush(&self.client, &self.bot_token, &channel, &msg_ts, &full_text).await;
-                        last_flush = Instant::now();
-                    }
-                }
-                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(last_flush) + FLUSH_INTERVAL), if !full_text.is_empty() => {
-                    do_flush(&self.client, &self.bot_token, &channel, &msg_ts, &full_text).await;
-                    last_flush = Instant::now();
-                }
-                _ = &mut cancel_rx => {
-                    break;
-                }
-            }
-        }
-
-        if !full_text.is_empty() {
-            do_finalize(
-                &self.client,
-                &self.bot_token,
-                &channel,
-                &msg_ts,
-                &thread_ts,
-                &full_text,
-            )
-            .await;
-        }
-
-        self.upload_images(&channel, &thread_ts, &images).await;
-
-        {
-            let sess = sess_arc.lock().unwrap();
-            let mut mgr = self.manager.lock().unwrap();
-            let _ = mgr.save(&session_key, &sess);
-        }
-
-        self.active_prompts.lock().unwrap().remove(&session_key);
-        let _ = done_tx.send(());
-    }
-
-    async fn upload_images(&self, channel: &str, thread_ts: &str, images: &[String]) {
-        for img_path in images {
-            let path = std::path::Path::new(img_path);
-            let filename = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n,
-                None => continue,
-            };
-            let file_body = match std::fs::read(path) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-
-            let part = reqwest::multipart::Part::bytes(file_body).file_name(filename.to_string());
-
-            let form = reqwest::multipart::Form::new()
-                .part("file", part)
-                .text("channels", channel.to_string())
-                .text("thread_ts", thread_ts.to_string());
-
-            let resp = self
-                .client
-                .post(api_url("files.upload"))
-                .header("Authorization", format!("Bearer {}", self.bot_token))
-                .multipart(form)
-                .timeout(Duration::from_secs(60))
-                .send()
-                .await;
-
-            match resp {
-                Ok(r) if r.status().is_success() => {
-                    let _ = std::fs::remove_file(path);
-                }
-                Ok(r) => {
-                    log::error!("slack upload {}: HTTP {}", filename, r.status());
-                }
-                Err(e) => {
-                    log::error!("slack upload {}: {}", filename, e);
-                }
-            }
-        }
+        .await;
     }
 }
 
@@ -767,26 +659,6 @@ mod tests {
             }
         });
         assert!(parse_event(&payload, "U12345").is_none());
-    }
-
-    #[test]
-    fn test_flush_display_short() {
-        let display = flush_display("Hello **world**");
-        assert!(!display.is_empty());
-        assert!(!display.contains(TRUNCATION_NOTE));
-    }
-
-    #[test]
-    fn test_flush_display_truncation_note() {
-        let long_text = format!("{}\n\n{}", "x".repeat(2500), "y".repeat(2500));
-        let display = flush_display(&long_text);
-        assert!(display.contains(TRUNCATION_NOTE));
-    }
-
-    #[test]
-    fn test_flush_display_empty() {
-        let display = flush_display("");
-        assert!(display.is_empty());
     }
 
     #[test]

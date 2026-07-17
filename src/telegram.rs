@@ -1,16 +1,14 @@
 use crate::core::session_manager::SessionManager;
 use crate::core::{Deps, Interface, Notifier};
-use crate::markdown::{split_text, telegram::markdown_to_telegram};
+use crate::integration::{self, ActivePrompt, StreamingBackend};
+use crate::markdown::telegram::markdown_to_telegram;
+use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
+use std::time::Duration;
 
 const TELEGRAM_TEXT_LIMIT: usize = 4000;
-const FLUSH_INTERVAL: Duration = Duration::from_secs(3);
-const TRUNCATION_NOTE: &str = "\n\n> _...message continues..._";
-const PROMPT_CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Deserialize)]
@@ -126,87 +124,54 @@ async fn tg_edit_message_text(
     Ok(())
 }
 
-fn flush_display(text: &str) -> String {
-    let mrkdwn = markdown_to_telegram(text);
-    let chunks = split_text(&mrkdwn, TELEGRAM_TEXT_LIMIT);
-    if chunks.is_empty() {
-        return String::new();
-    }
-    let display = &chunks[0];
-    let needs_truncation = chunks.len() > 1 || display.len() < mrkdwn.len();
-    let mut display = display.to_string();
-    if needs_truncation {
-        display.push_str(TRUNCATION_NOTE);
-    }
-    if display.len() > TELEGRAM_TEXT_LIMIT {
-        display.truncate(TELEGRAM_TEXT_LIMIT);
-    }
-    display
-}
-
-async fn do_flush(
-    client: &reqwest::Client,
-    token: &str,
+struct TgStreaming {
+    client: reqwest::Client,
+    token: String,
     chat_id: i64,
-    message_id: i64,
-    text: &str,
-) {
-    let display = flush_display(text);
-    if display.is_empty() {
-        return;
-    }
-    if let Err(e) = tg_edit_message_text(
-        client,
-        token,
-        chat_id,
-        message_id,
-        &display,
-        Some("MarkdownV2"),
-    )
-    .await
-    {
-        log::error!("telegram update message: {}", e);
-    }
 }
 
-async fn do_finalize(
-    client: &reqwest::Client,
-    token: &str,
-    chat_id: i64,
-    message_id: i64,
-    text: &str,
-) {
-    let mrkdwn = markdown_to_telegram(text);
-    let chunks = split_text(&mrkdwn, TELEGRAM_TEXT_LIMIT);
-    for (i, chunk) in chunks.iter().enumerate() {
-        let mut chunk = chunk.clone();
-        if chunk.len() > TELEGRAM_TEXT_LIMIT {
-            chunk.truncate(TELEGRAM_TEXT_LIMIT);
-        }
-        let result = if i == 0 {
-            tg_edit_message_text(
-                client,
-                token,
-                chat_id,
-                message_id,
-                &chunk,
-                Some("MarkdownV2"),
-            )
-            .await
-        } else {
-            tg_send_message(client, token, chat_id, &chunk, Some("MarkdownV2"))
-                .await
-                .map(|_| ())
-        };
-        if let Err(e) = result {
-            log::error!("telegram finalize: {}", e);
-        }
-    }
-}
+#[async_trait]
+impl StreamingBackend for TgStreaming {
+    type MsgId = i64;
 
-struct ActivePrompt {
-    cancel: oneshot::Sender<()>,
-    done: oneshot::Receiver<()>,
+    fn flush_interval(&self) -> Duration {
+        Duration::from_secs(3)
+    }
+
+    fn text_limit(&self) -> usize {
+        TELEGRAM_TEXT_LIMIT
+    }
+
+    fn markdown(&self, text: &str) -> String {
+        markdown_to_telegram(text)
+    }
+
+    async fn send_thinking(&self) -> Result<i64, String> {
+        tg_send_message(&self.client, &self.token, self.chat_id, "...", None).await
+    }
+
+    async fn edit_message(&self, msg_id: &i64, text: &str) -> Result<(), String> {
+        tg_edit_message_text(
+            &self.client,
+            &self.token,
+            self.chat_id,
+            *msg_id,
+            text,
+            Some("MarkdownV2"),
+        )
+        .await
+    }
+
+    async fn post_message(&self, text: &str) -> Result<i64, String> {
+        tg_send_message(
+            &self.client,
+            &self.token,
+            self.chat_id,
+            text,
+            Some("MarkdownV2"),
+        )
+        .await
+    }
 }
 
 struct BotInner {
@@ -293,7 +258,20 @@ impl BotInner {
         }
 
         let session_key = self.session_key(chat_id);
-        self.process_prompt(chat_id, text, session_key).await;
+        let backend = TgStreaming {
+            client: self.client.clone(),
+            token: self.token.clone(),
+            chat_id,
+        };
+        integration::process_prompt(
+            &backend,
+            &self.manager,
+            &self.active_prompts,
+            chat_id,
+            &session_key,
+            &text,
+        )
+        .await;
     }
 
     fn session_key(&self, chat_id: i64) -> String {
@@ -301,110 +279,6 @@ impl BotInner {
         keys.get(&chat_id)
             .cloned()
             .unwrap_or_else(|| chat_id.to_string())
-    }
-
-    async fn process_prompt(&self, chat_id: i64, text: String, session_key: String) {
-        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        let (done_tx, done_rx) = oneshot::channel::<()>();
-        tokio::pin!(cancel_rx);
-
-        let prior = self.active_prompts.lock().unwrap().remove(&chat_id);
-        if let Some(prior) = prior {
-            let _ = prior.cancel.send(());
-            let _ = tokio::time::timeout(PROMPT_CANCEL_TIMEOUT, prior.done).await;
-        }
-
-        self.active_prompts.lock().unwrap().insert(
-            chat_id,
-            ActivePrompt {
-                cancel: cancel_tx,
-                done: done_rx,
-            },
-        );
-
-        let msg_id = match tg_send_message(&self.client, &self.token, chat_id, "...", None).await {
-            Ok(id) => id,
-            Err(e) => {
-                log::error!("telegram post thinking: {}", e);
-                self.active_prompts.lock().unwrap().remove(&chat_id);
-                let _ = done_tx.send(());
-                return;
-            }
-        };
-
-        let sess_arc = {
-            let result = {
-                let mut mgr = self.manager.lock().unwrap();
-                mgr.get_or_create(&session_key)
-            };
-            match result {
-                Ok(s) => s,
-                Err(e) => {
-                    log::error!("telegram session: {}", e);
-                    let _ = do_finalize(
-                        &self.client,
-                        &self.token,
-                        chat_id,
-                        msg_id,
-                        "Error interno creando sesi\u{f3}n.",
-                    )
-                    .await;
-                    self.active_prompts.lock().unwrap().remove(&chat_id);
-                    let _ = done_tx.send(());
-                    return;
-                }
-            }
-        };
-
-        let mut events = {
-            let mut sess = sess_arc.lock().unwrap();
-            sess.prompt(&text)
-        };
-
-        let mut full_text = String::new();
-        let mut last_flush = Instant::now();
-
-        loop {
-            tokio::select! {
-                ev = events.recv() => {
-                    match ev {
-                        Some(ev) => match ev.kind {
-                            crate::agent::EventKind::TextDelta(delta) => full_text.push_str(&delta),
-                            crate::agent::EventKind::Error(msg) => {
-                                full_text.push_str("\n\nError: ");
-                                full_text.push_str(&msg);
-                            }
-                            _ => {}
-                        },
-                        None => break,
-                    }
-                    if !full_text.is_empty() && last_flush.elapsed() >= FLUSH_INTERVAL {
-                        do_flush(&self.client, &self.token, chat_id, msg_id, &full_text).await;
-                        last_flush = Instant::now();
-                    }
-                }
-                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(last_flush) + FLUSH_INTERVAL), if !full_text.is_empty() => {
-                    do_flush(&self.client, &self.token, chat_id, msg_id, &full_text).await;
-                    last_flush = Instant::now();
-                }
-                _ = &mut cancel_rx => {
-                    break;
-                }
-            }
-        }
-
-        if !full_text.is_empty() {
-            do_finalize(&self.client, &self.token, chat_id, msg_id, &full_text).await;
-        }
-
-        {
-            let sess = sess_arc.lock().unwrap();
-            let mut mgr = self.manager.lock().unwrap();
-            let _ = mgr.save(&session_key, &sess);
-        }
-
-        self.active_prompts.lock().unwrap().remove(&chat_id);
-        let _ = done_tx.send(());
     }
 }
 
@@ -515,26 +389,6 @@ mod tests {
         };
         assert_eq!(bot.session_key(42), "42:123456789");
         assert_eq!(bot.session_key(99), "99");
-    }
-
-    #[test]
-    fn test_flush_display_short() {
-        let display = flush_display("Hello world");
-        assert!(!display.is_empty());
-        assert!(!display.contains(TRUNCATION_NOTE));
-    }
-
-    #[test]
-    fn test_flush_display_truncation_note() {
-        let long_text = format!("{}\n\n{}", "x".repeat(3000), "y".repeat(3000));
-        let display = flush_display(&long_text);
-        assert!(display.contains(TRUNCATION_NOTE));
-    }
-
-    #[test]
-    fn test_flush_display_empty() {
-        let display = flush_display("");
-        assert!(display.is_empty());
     }
 
     fn dummy_manager() -> SessionManager {

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod config;
 pub mod core;
+pub mod integration;
 pub mod markdown;
 pub mod message;
 pub mod prompts;

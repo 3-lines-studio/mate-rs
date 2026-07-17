@@ -1,5 +1,5 @@
 use crate::tools::define_tool;
-use crate::tools::gitignore::{parse_gitignore, should_skip_dir};
+use crate::tools::gitignore::{parse_gitignore, walk_files};
 use crate::tools::Tool;
 use regex::Regex;
 use serde::Deserialize;
@@ -83,68 +83,42 @@ fn execute_grep(mut p: GrepParams) -> Result<String, String> {
     let mut results: Vec<String> = Vec::new();
     let max = p.max_results as usize;
 
-    fn walk(
-        dir: &Path,
-        root: &Path,
-        ig: &crate::tools::gitignore::GitignoreMatcher,
-        matcher: &dyn Fn(&str) -> bool,
-        glob: &str,
-        max_results: usize,
-        results: &mut Vec<String>,
-    ) -> bool {
-        let read_dir = match std::fs::read_dir(dir) {
-            Ok(rd) => rd,
-            Err(_) => return false,
-        };
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            let rel = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-            if path.is_dir() {
-                let name = entry.file_name().to_string_lossy().to_lowercase();
-                if should_skip_dir(&name) {
-                    continue;
-                }
-                if ig.is_ignored(&rel, true) {
-                    continue;
-                }
-                if walk(&path, root, ig, matcher, glob, max_results, results) {
-                    return true;
-                }
-            } else {
-                if ig.is_ignored(&rel, false) {
-                    continue;
-                }
-                if !glob.is_empty() {
-                    let fname = entry.file_name().to_string_lossy().to_string();
-                    if !glob_filename_match(glob, &fname) {
-                        continue;
-                    }
-                }
-                if is_binary_file(&path) {
-                    continue;
-                }
-                let remaining = max_results - results.len();
-                if remaining == 0 {
-                    return true;
-                }
-                if let Ok(m) = grep_file(&path, matcher, remaining as i32) {
-                    if !m.is_empty() {
-                        results.push(m);
-                    }
-                }
-                if results.len() >= max_results {
-                    return true;
-                }
+    let glob_matcher = if p.glob.is_empty() {
+        None
+    } else {
+        Some(
+            globset::GlobBuilder::new(&p.glob)
+                .literal_separator(true)
+                .build()
+                .map_err(|e| format!("grep: invalid glob: {}", e))?
+                .compile_matcher(),
+        )
+    };
+
+    walk_files(path, &ig, &[], &mut |full_path, _rel| {
+        if let Some(ref gm) = glob_matcher {
+            let fname = full_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !gm.is_match(&fname) {
+                return true;
             }
         }
-        false
-    }
-
-    walk(path, path, &ig, &*matcher, &p.glob, max, &mut results);
+        if is_binary_file(full_path) {
+            return true;
+        }
+        let remaining = max - results.len();
+        if remaining == 0 {
+            return false;
+        }
+        if let Ok(m) = grep_file(full_path, &*matcher, remaining as i32) {
+            if !m.is_empty() {
+                results.push(m);
+            }
+        }
+        results.len() < max
+    });
 
     Ok(results.join("\n"))
 }
@@ -214,35 +188,6 @@ fn is_binary_file(path: &Path) -> bool {
     let mut buf = [0u8; 8192];
     let n = f.read(&mut buf).unwrap_or(0);
     buf[..n].contains(&0)
-}
-
-fn glob_filename_match(pattern: &str, name: &str) -> bool {
-    fn matches(p: &[u8], n: &[u8]) -> bool {
-        let (mut pi, mut ni) = (0, 0);
-        let (mut star_p, mut star_n) = (None::<usize>, 0);
-
-        while ni < n.len() || pi < p.len() {
-            if pi < p.len() && p[pi] == b'*' {
-                star_p = Some(pi);
-                star_n = ni;
-                pi += 1;
-            } else if pi < p.len() && ni < n.len() && (p[pi] == b'?' || p[pi] == n[ni]) {
-                pi += 1;
-                ni += 1;
-            } else if let Some(sp) = star_p {
-                if star_n >= n.len() {
-                    return false;
-                }
-                pi = sp + 1;
-                star_n += 1;
-                ni = star_n;
-            } else {
-                return false;
-            }
-        }
-        true
-    }
-    matches(pattern.as_bytes(), name.as_bytes())
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
 use crate::tools::define_tool;
-use crate::tools::gitignore::{parse_gitignore, should_skip_dir};
+use crate::tools::gitignore::{parse_gitignore, walk_files};
 use crate::tools::Tool;
-use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -49,94 +48,27 @@ fn execute_glob(mut p: GlobParams) -> Result<String, String> {
         p.max_results = 50;
     }
 
-    let re = glob_to_regex(&p.pattern).map_err(|e| format!("glob: {}", e))?;
+    let glob = globset::GlobBuilder::new(&p.pattern)
+        .literal_separator(true)
+        .build()
+        .map_err(|e| format!("glob: {}", e))?;
+    let matcher = glob.compile_matcher();
 
     let ig = parse_gitignore(&p.path);
 
     let mut results: Vec<String> = Vec::new();
 
     let root = std::path::Path::new(&p.path);
-    walk_dir_glob(root, root, &ig, &re, p.max_results, &mut results);
+    let max = p.max_results as usize;
+    walk_files(root, &ig, &[], &mut |_full_path, rel| {
+        if matcher.is_match(rel) {
+            results.push(rel.to_string());
+        }
+        results.len() < max
+    });
 
     results.sort();
     Ok(results.join("\n"))
-}
-
-fn walk_dir_glob(
-    base: &std::path::Path,
-    dir: &std::path::Path,
-    ig: &crate::tools::gitignore::GitignoreMatcher,
-    re: &regex::Regex,
-    max_results: i32,
-    results: &mut Vec<String>,
-) {
-    if results.len() >= max_results as usize {
-        return;
-    }
-    if let Ok(read_dir) = std::fs::read_dir(dir) {
-        for entry in read_dir.flatten() {
-            if results.len() >= max_results as usize {
-                return;
-            }
-            let path = entry.path();
-            let rel = path
-                .strip_prefix(base)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-
-            if path.is_dir() {
-                let name = entry.file_name().to_string_lossy().to_lowercase();
-                if should_skip_dir(&name) {
-                    continue;
-                }
-                if ig.is_ignored(&rel, true) {
-                    continue;
-                }
-                walk_dir_glob(base, &path, ig, re, max_results, results);
-            } else {
-                if ig.is_ignored(&rel, false) {
-                    continue;
-                }
-                if re.is_match(&rel) {
-                    results.push(rel);
-                }
-            }
-        }
-    }
-}
-
-fn glob_to_regex(pattern: &str) -> Result<Regex, String> {
-    let segments: Vec<&str> = pattern.split('/').collect();
-
-    let mut prefix = String::new();
-    let segs = if segments.len() > 1 && segments[0] == "**" {
-        prefix = "(.*/)?".to_string();
-        &segments[1..]
-    } else {
-        &segments[..]
-    };
-
-    let mut parts: Vec<String> = Vec::new();
-    for seg in segs {
-        if *seg == "**" {
-            parts.push(".*".to_string());
-        } else {
-            let mut sb = String::new();
-            for c in seg.chars() {
-                match c {
-                    '*' => sb.push_str("[^/]*"),
-                    '?' => sb.push_str("[^/]"),
-                    _ => sb.push_str(&regex::escape(&c.to_string())),
-                }
-            }
-            parts.push(sb);
-        }
-    }
-
-    let result = format!("{}{}", prefix, parts.join("/"));
-    let result = if result.is_empty() { ".*" } else { &result };
-    Regex::new(&format!("^{}$", result)).map_err(|e| format!("invalid glob pattern: {}", e))
 }
 
 #[cfg(test)]
@@ -215,6 +147,23 @@ mod tests {
         })
         .unwrap();
         assert_eq!(result.lines().count(), 5);
+    }
+
+    #[test]
+    fn test_glob_star_does_not_cross_slash() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("root.go"), "").unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("nested.go"), "").unwrap();
+
+        let result = execute_glob(GlobParams {
+            pattern: "*.go".to_string(),
+            path: dir.path().to_string_lossy().to_string(),
+            max_results: 0,
+        })
+        .unwrap();
+        assert_eq!(result, "root.go");
     }
 
     #[test]

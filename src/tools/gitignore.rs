@@ -1,3 +1,4 @@
+use globset::Glob;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::RwLock;
@@ -10,6 +11,7 @@ struct GitignoreRule {
     dir_only: bool,
     anchored: bool,
     dir: String,
+    glob: Option<Glob>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,37 +34,73 @@ pub(crate) fn should_skip_dir(name: &str) -> bool {
     )
 }
 
+pub fn walk_files(
+    base: &Path,
+    ig: &GitignoreMatcher,
+    extra_skip: &[&str],
+    on_file: &mut dyn FnMut(&Path, &str) -> bool,
+) {
+    walk_files_impl(base, base, ig, extra_skip, on_file);
+}
+
+fn walk_files_impl(
+    base: &Path,
+    dir: &Path,
+    ig: &GitignoreMatcher,
+    extra_skip: &[&str],
+    on_file: &mut dyn FnMut(&Path, &str) -> bool,
+) -> bool {
+    let read_dir = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return false,
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(base)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        if path.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if should_skip_dir(&name) {
+                continue;
+            }
+            if extra_skip.contains(&name.as_str()) {
+                continue;
+            }
+            if ig.is_ignored(&rel, true) {
+                continue;
+            }
+            if walk_files_impl(base, &path, ig, extra_skip, on_file) {
+                return true;
+            }
+        } else {
+            if ig.is_ignored(&rel, false) {
+                continue;
+            }
+            if !on_file(&path, &rel) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn parse_gitignore(root: &str) -> GitignoreMatcher {
     let root = std::fs::canonicalize(root).unwrap_or_else(|_| Path::new(root).to_path_buf());
     let root_str = root.to_string_lossy().to_string();
 
     let mut paths: Vec<String> = Vec::new();
 
-    fn walk_for_gitignore(dir: &Path, paths: &mut Vec<String>) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-            if is_dir && name_str == ".git" {
-                continue;
-            }
-            if is_dir && should_skip_dir(&name_str) {
-                continue;
-            }
-            if name_str == ".gitignore" {
-                paths.push(entry.path().to_string_lossy().to_string());
-            }
-            if is_dir {
-                walk_for_gitignore(&entry.path(), paths);
-            }
+    let empty_ig = GitignoreMatcher { rules: Vec::new() };
+    walk_files(&root, &empty_ig, &[".git"], &mut |full_path, _rel| {
+        if full_path.file_name().is_some_and(|n| n == ".gitignore") {
+            paths.push(full_path.to_string_lossy().to_string());
         }
-    }
-
-    walk_for_gitignore(&root, &mut paths);
+        true
+    });
 
     {
         let cache = CACHE.read().unwrap();
@@ -158,12 +196,22 @@ fn parse_gitignore_file(path: &str, dir: &str) -> Vec<GitignoreRule> {
             line = stripped.to_string();
         }
 
+        let matcher = if line.is_empty() || line.contains('[') || line.contains('{') {
+            None
+        } else {
+            globset::GlobBuilder::new(&line)
+                .literal_separator(true)
+                .build()
+                .ok()
+        };
+
         rules.push(GitignoreRule {
             pattern: line,
             negate,
             dir_only,
             anchored,
             dir: dir.to_string(),
+            glob: matcher,
         });
     }
     rules
@@ -207,12 +255,19 @@ impl GitignoreMatcher {
                 rel_path.to_string()
             };
 
-            if glob_match(&rule.pattern, &target) {
+            if glob_match_fallback(&rule.pattern, &target, rule.glob.as_ref()) {
                 ignored = !rule.negate;
             }
         }
         ignored
     }
+}
+
+fn glob_match_fallback(pattern: &str, name: &str, compiled: Option<&Glob>) -> bool {
+    if let Some(g) = compiled {
+        return g.compile_matcher().is_match(name);
+    }
+    glob_match(pattern, name)
 }
 
 fn glob_match(pattern: &str, name: &str) -> bool {

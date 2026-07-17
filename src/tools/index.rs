@@ -1,5 +1,5 @@
 use crate::tools::define_tool;
-use crate::tools::gitignore::{parse_gitignore, should_skip_dir};
+use crate::tools::gitignore::{parse_gitignore, walk_files};
 use crate::tools::Tool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -176,7 +176,14 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
     let ig = parse_gitignore(&p.path);
 
     let mut to_process: Vec<String> = Vec::new();
-    collect_files(root, root, &ig, &mut to_process);
+    walk_files(root, &ig, &[INDEX_DIR], &mut |_full_path, rel| {
+        if let Some(ext) = extract_extension(rel) {
+            if SUPPORTED_EXTS.contains(&ext) {
+                to_process.push(rel.to_string());
+            }
+        }
+        true
+    });
 
     let mut new_files: HashMap<String, f64> = HashMap::new();
     let mut new_defs: Vec<IndexDef> = Vec::new();
@@ -326,49 +333,6 @@ fn extract_extension(path: &str) -> Option<&str> {
     Path::new(path).extension().and_then(|e| e.to_str())
 }
 
-fn collect_files(
-    base: &Path,
-    dir: &Path,
-    ig: &crate::tools::gitignore::GitignoreMatcher,
-    results: &mut Vec<String>,
-) {
-    let read_dir = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(_) => return,
-    };
-    for entry in read_dir.flatten() {
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(base)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-
-        if path.is_dir() {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            if should_skip_dir(&name) {
-                continue;
-            }
-            if ig.is_ignored(&rel, true) {
-                continue;
-            }
-            if name == INDEX_DIR {
-                continue;
-            }
-            collect_files(base, &path, ig, results);
-        } else {
-            if ig.is_ignored(&rel, false) {
-                continue;
-            }
-            if let Some(ext) = extract_extension(&rel) {
-                if SUPPORTED_EXTS.contains(&ext) {
-                    results.push(rel);
-                }
-            }
-        }
-    }
-}
-
 fn process_file(root: &Path, rel: &str, mtime: f64) -> Result<Vec<IndexDef>, String> {
     let ext = extract_extension(rel).unwrap_or("");
     let (_, language, query_str) =
@@ -435,7 +399,10 @@ fn find_refs(root: &str, target: &str, max_results: i32) -> Result<String, Strin
     if candidate_files.is_empty() {
         candidate_files = Vec::new();
         let ig = parse_gitignore(root);
-        collect_files(root_path, root_path, &ig, &mut candidate_files);
+        walk_files(root_path, &ig, &[], &mut |_full_path, rel| {
+            candidate_files.push(rel.to_string());
+            true
+        });
     }
 
     let mut results: Vec<String> = Vec::new();

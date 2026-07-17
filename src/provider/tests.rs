@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::message::{Message, Role};
 use wiremock::matchers::{method, path};

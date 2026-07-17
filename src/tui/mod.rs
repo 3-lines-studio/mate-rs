@@ -260,14 +260,19 @@ impl App {
                                 }
                                 if !self.chat.textarea.is_empty() {
                                     self.chat.clear_textarea();
-                                    self.chat.ctrl_c_pending = true;
+                                    self.chat.ctrl_c_armed_at = Some(Instant::now());
                                     return;
                                 }
-                                if self.chat.ctrl_c_pending {
+                                let armed = self
+                                    .chat
+                                    .ctrl_c_armed_at
+                                    .map(|t| t.elapsed() < Duration::from_millis(1500))
+                                    .unwrap_or(false);
+                                if armed {
                                     self.should_quit = true;
-                                    return;
+                                } else {
+                                    self.chat.ctrl_c_armed_at = Some(Instant::now());
                                 }
-                                self.chat.ctrl_c_pending = true;
                             }
                             (false, false, KeyCode::Esc) => {
                                 if self.chat.active_modal != Modal::None {
