@@ -368,11 +368,11 @@ impl BotInner {
             tokio::select! {
                 ev = events.recv() => {
                     match ev {
-                        Some(ev) => match ev.event_type.as_str() {
-                            "text_delta" => full_text.push_str(&ev.delta),
-                            "error" => {
+                        Some(ev) => match ev.kind {
+                            crate::agent::EventKind::TextDelta(delta) => full_text.push_str(&delta),
+                            crate::agent::EventKind::Error(msg) => {
                                 full_text.push_str("\n\nError: ");
-                                full_text.push_str(&ev.error);
+                                full_text.push_str(&msg);
                             }
                             _ => {}
                         },

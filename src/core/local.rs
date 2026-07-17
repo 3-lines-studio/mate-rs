@@ -42,32 +42,32 @@ impl Interface for LocalInterface {
             loop {
                 let ev = rt.block_on(events.recv());
                 match ev {
-                    Some(ev) => match ev.event_type.as_str() {
-                        "text_delta" => {
-                            print!("{}", ev.delta);
+                    Some(ev) => match ev.kind {
+                        crate::agent::EventKind::TextDelta(delta) => {
+                            print!("{}", delta);
                             stdout.flush()?;
                         }
-                        "tool_call_start" => {
-                            println!("\n[{}()]", ev.tool_call_name);
+                        crate::agent::EventKind::ToolCallStart { name, .. } => {
+                            println!("\n[{}()]", name);
                         }
-                        "tool_result" => {
-                            let lines: Vec<&str> = ev.tool_result.lines().collect();
+                        crate::agent::EventKind::ToolResult { result, .. } => {
+                            let lines: Vec<&str> = result.lines().collect();
                             if lines.len() > 10 {
                                 for l in &lines[..10] {
                                     println!("{}", l);
                                 }
                                 println!("... ({} lines total)", lines.len());
                             } else {
-                                println!("{}", ev.tool_result);
+                                println!("{}", result);
                             }
                         }
-                        "tool_error" => {
-                            println!("[{} error: {}]", ev.tool_call_name, ev.tool_error);
+                        crate::agent::EventKind::ToolError { name, error, .. } => {
+                            println!("[{} error: {}]", name, error);
                         }
-                        "error" => {
-                            println!("\nError: {}", ev.error);
+                        crate::agent::EventKind::Error(msg) => {
+                            println!("\nError: {}", msg);
                         }
-                        "agent_done" => {}
+                        crate::agent::EventKind::AgentDone(_) => {}
                         _ => {}
                     },
                     None => break,

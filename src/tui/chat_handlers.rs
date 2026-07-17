@@ -156,25 +156,26 @@ pub fn handle_agent_event(
     finished: &mut bool,
     active_session: Option<&crate::agent::AgentSession>,
 ) {
-    match event.event_type.as_str() {
-        "text_delta" => {
+    use crate::agent::EventKind;
+    match &event.kind {
+        EventKind::TextDelta(delta) => {
             let lb = ensure_block(live_blocks, "prose");
-            lb.raw.push_str(&event.delta);
+            lb.raw.push_str(delta);
             lb.rendered.clear();
         }
-        "reasoning_delta" => {
+        EventKind::ReasoningDelta(delta) => {
             let lb = ensure_block(live_blocks, "thinking");
-            lb.raw.push_str(&event.delta);
+            lb.raw.push_str(delta);
             lb.rendered.clear();
         }
-        "tool_call_start" => {
+        EventKind::ToolCallStart { id, name, args } => {
             let block = LiveBlock {
                 kind: "tool".into(),
                 raw: String::new(),
                 rendered: String::new(),
-                tool_name: event.tool_call_name.clone(),
-                tool_args: event.tool_call_args.clone(),
-                tool_id: event.tool_call_id.clone(),
+                tool_name: name.clone(),
+                tool_args: args.clone(),
+                tool_id: id.clone(),
                 tool_result: String::new(),
                 tool_error: String::new(),
                 tool_duration: String::new(),
@@ -191,51 +192,56 @@ pub fn handle_agent_event(
                 live_blocks.push(block);
             }
         }
-        "tool_result" => {
-            if let Some(lb) = find_block_mut(live_blocks, &event.tool_call_id) {
-                lb.tool_result = event.tool_result.clone();
-                lb.tool_duration = event.tool_duration.clone();
+        EventKind::ToolResult {
+            id,
+            result,
+            duration,
+            ..
+        } => {
+            if let Some(lb) = find_block_mut(live_blocks, id) {
+                lb.tool_result = result.clone();
+                lb.tool_duration = duration.clone();
                 lb.rendered.clear();
             }
         }
-        "tool_error" => {
-            if let Some(lb) = find_block_mut(live_blocks, &event.tool_call_id) {
-                lb.tool_error = event.tool_error.clone();
-                lb.tool_duration = event.tool_duration.clone();
+        EventKind::ToolError {
+            id,
+            error,
+            duration,
+            ..
+        } => {
+            if let Some(lb) = find_block_mut(live_blocks, id) {
+                lb.tool_error = error.clone();
+                lb.tool_duration = duration.clone();
                 lb.rendered.clear();
             }
         }
-        "agent_done" => {
+        EventKind::AgentDone(_) => {
             if event.subagent.is_empty() {
                 *finished = true;
             }
         }
-        "retry" => {
+        EventKind::Retry(msg) => {
             if event.subagent.is_empty() {
-                messages.push(ChatMsg::error(&event.error));
+                messages.push(ChatMsg::error(msg));
             }
         }
-        "retry_available" => {
+        EventKind::RetryAvailable(msg) => {
             if event.subagent.is_empty() {
-                messages.push(ChatMsg::error(&format!(
-                    "{} — Press Ctrl+R to retry",
-                    event.error
-                )));
+                messages.push(ChatMsg::error(&format!("{} — Press Ctrl+R to retry", msg)));
                 *retry_available = true;
                 *finished = true;
             }
         }
-        "error" => {
+        EventKind::Error(msg) => {
             if event.subagent.is_empty() {
-                messages.push(ChatMsg::error(&event.error));
+                messages.push(ChatMsg::error(msg));
                 *finished = true;
             }
         }
-        "usage" if event.subagent.is_empty() => {
-            if let Some(ref usage) = event.usage {
-                *total_tokens = usage.total_tokens;
-                *cache_hit_tokens = usage.prompt_cache_hit_tokens;
-            }
+        EventKind::Usage(usage) if event.subagent.is_empty() => {
+            *total_tokens = usage.total_tokens;
+            *cache_hit_tokens = usage.prompt_cache_hit_tokens;
             if let Some(asession) = active_session {
                 *total_cost = asession.sess().cost;
             }

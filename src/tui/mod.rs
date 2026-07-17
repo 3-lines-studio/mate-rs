@@ -572,12 +572,13 @@ impl App {
     }
 
     fn handle_agent_event(&mut self, event: Event) {
-        if event.event_type == "agent_done" && event.subagent.is_empty() {
+        if matches!(&event.kind, crate::agent::EventKind::AgentDone(_)) && event.subagent.is_empty()
+        {
             self.chat.finish_bot_message_now();
             self.reload_current_session();
             return;
         }
-        if event.event_type == "error" && event.subagent.is_empty() {
+        if matches!(&event.kind, crate::agent::EventKind::Error(_)) && event.subagent.is_empty() {
             self.chat.handle_agent_event_inner(&event);
             self.reload_current_session();
             return;

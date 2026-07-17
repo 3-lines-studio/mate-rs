@@ -193,8 +193,8 @@ async fn run_job(ctx: &JobCtx) -> Result<String, String> {
     let mut events = asession.prompt(&ctx.job.prompt);
     let mut sb = String::new();
     while let Some(ev) = events.recv().await {
-        if ev.event_type == "text_delta" {
-            sb.push_str(&ev.delta);
+        if let crate::agent::EventKind::TextDelta(delta) = ev.kind {
+            sb.push_str(&delta);
         }
     }
 

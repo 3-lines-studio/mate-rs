@@ -1,5 +1,5 @@
 use crate::message::{Message, ReasoningDetail, Role, ToolCall, ToolCallFunction, ToolDef};
-use crate::provider::{ChatClient, ChatRequest, ProviderError, StreamToolCall, Usage};
+use crate::provider::{ChatClient, ChatRequest, ProviderError, StreamEvent, StreamToolCall, Usage};
 use crate::session::store::Store;
 use crate::session::types::{compute_turn_id, turn_label};
 use crate::session::{Session, Turn};
@@ -13,118 +13,153 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 
-const TOOL_RULES_PROMPT: &str = r"CRITICAL TOOL RULES:
-- Use tools directly — never describe what you'd do, execute it.
-- Do not fabricate results.
-- Non-delegate tool calls timeout after 120 seconds.
-- Prefer `symbols` (kind: find/refs/list) over grep for symbol lookups in Rust, Go, TS/TSX/JSX, CSS.";
+const TOOL_TIMEOUT_SECS: u64 = 120;
+const COMPACTION_THRESHOLD_NUM: i32 = 7;
+const COMPACTION_THRESHOLD_DEN: i32 = 10;
+const COMPACTION_BUDGET_DIVISOR: i32 = 3;
+
+fn tool_rules_prompt() -> String {
+    format!(
+        "CRITICAL TOOL RULES:\n- Use tools directly — never describe what you'd do, execute it.\n- Do not fabricate results.\n- Non-delegate tool calls timeout after {} seconds.\n- Prefer `symbols` (kind: find/refs/list) over grep for symbol lookups in Rust, Go, TS/TSX/JSX, CSS.",
+        TOOL_TIMEOUT_SECS
+    )
+}
 
 // ── Event ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Event {
-    pub event_type: String,
-    pub delta: String,
-    pub tool_call_id: String,
-    pub tool_call_name: String,
-    pub tool_call_args: String,
-    pub tool_result: String,
-    pub tool_error: String,
-    pub tool_duration: String,
-    pub error: String,
-    pub finish_reason: String,
-    pub usage: Option<Usage>,
+    pub kind: EventKind,
     pub subagent: String,
     pub subagent_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum EventKind {
+    TextDelta(String),
+    ReasoningDelta(String),
+    ToolCallStart {
+        id: String,
+        name: String,
+        args: String,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        args: String,
+        result: String,
+        duration: String,
+    },
+    ToolError {
+        id: String,
+        name: String,
+        error: String,
+        duration: String,
+    },
+    Error(String),
+    Retry(String),
+    RetryAvailable(String),
+    AgentDone(String),
+    Usage(Usage),
+    CompactingStart,
 }
 
 impl Event {
     pub fn text_delta(delta: &str) -> Self {
         Event {
-            event_type: "text_delta".into(),
-            delta: delta.into(),
-            ..Default::default()
+            kind: EventKind::TextDelta(delta.into()),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn reasoning_delta(delta: &str) -> Self {
         Event {
-            event_type: "reasoning_delta".into(),
-            delta: delta.into(),
-            ..Default::default()
+            kind: EventKind::ReasoningDelta(delta.into()),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn tool_call_start(tc: &StreamToolCall) -> Self {
         Event {
-            event_type: "tool_call_start".into(),
-            tool_call_id: tc.id.clone(),
-            tool_call_name: tc.name.clone(),
-            tool_call_args: tc.arguments.clone(),
-            ..Default::default()
+            kind: EventKind::ToolCallStart {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                args: tc.arguments.clone(),
+            },
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn tool_result_ev(tc: &StreamToolCall, result: &str, duration: &str) -> Self {
         Event {
-            event_type: "tool_result".into(),
-            tool_call_id: tc.id.clone(),
-            tool_call_name: tc.name.clone(),
-            tool_call_args: tc.arguments.clone(),
-            tool_result: result.into(),
-            tool_duration: duration.into(),
-            ..Default::default()
+            kind: EventKind::ToolResult {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                args: tc.arguments.clone(),
+                result: result.into(),
+                duration: duration.into(),
+            },
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn tool_error_ev(tc: &StreamToolCall, msg: &str, duration: &str) -> Self {
         Event {
-            event_type: "tool_error".into(),
-            tool_call_id: tc.id.clone(),
-            tool_call_name: tc.name.clone(),
-            tool_error: msg.into(),
-            tool_duration: duration.into(),
-            ..Default::default()
+            kind: EventKind::ToolError {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                error: msg.into(),
+                duration: duration.into(),
+            },
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn tool_error_deferred(tc: &StreamToolCall, msg: &str) -> Self {
         Event {
-            event_type: "tool_error".into(),
-            tool_call_id: tc.id.clone(),
-            tool_call_name: tc.name.clone(),
-            tool_error: msg.into(),
-            ..Default::default()
+            kind: EventKind::ToolError {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                error: msg.into(),
+                duration: String::new(),
+            },
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn error_msg(msg: &str) -> Self {
         Event {
-            event_type: "error".into(),
-            error: msg.into(),
-            ..Default::default()
+            kind: EventKind::Error(msg.into()),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn retry_ev(msg: &str) -> Self {
         Event {
-            event_type: "retry".into(),
-            error: msg.into(),
-            ..Default::default()
+            kind: EventKind::Retry(msg.into()),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn retry_available(msg: &str) -> Self {
         Event {
-            event_type: "retry_available".into(),
-            error: msg.into(),
-            ..Default::default()
+            kind: EventKind::RetryAvailable(msg.into()),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn agent_done(finish_reason: &str) -> Self {
         Event {
-            event_type: "agent_done".into(),
-            finish_reason: finish_reason.into(),
-            ..Default::default()
+            kind: EventKind::AgentDone(finish_reason.into()),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
     pub fn usage_ev(usage: Usage) -> Self {
         Event {
-            event_type: "usage".into(),
-            usage: Some(usage),
-            ..Default::default()
+            kind: EventKind::Usage(usage),
+            subagent: String::new(),
+            subagent_id: String::new(),
         }
     }
 }
@@ -166,8 +201,41 @@ struct RoundResult {
     finish_reason: String,
 }
 
+// ── UsageCounters ────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct UsageCounters {
+    total_prompt_tokens: i32,
+    total_completion_tokens: i32,
+    total_cost: f64,
+    last_request_tokens: i32,
+    last_total_tokens: i32,
+}
+
+// ── CompactionState ─────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct CompactionState {
+    cached_ancestry_msgs: Vec<Message>,
+    cached_ancestry_turn_id: String,
+    compaction_client: Option<Arc<dyn ChatClient>>,
+    compacting: bool,
+    compacted_summary: String,
+    compacted_up_to: String,
+}
+
+// ── SubagentState ────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct SubagentState {
+    subagents: HashMap<String, SubagentDef>,
+    subagent_turns: Vec<SubagentTurn>,
+    is_subagent: bool,
+}
+
 // ── AgentSession ─────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct AgentSession {
     store: Arc<TokioMutex<Store>>,
     sess: Session,
@@ -177,29 +245,17 @@ pub struct AgentSession {
     max_rounds: i32,
     cwd: String,
 
-    total_prompt_tokens: i32,
-    total_completion_tokens: i32,
-    total_cost: f64,
-    last_request_tokens: i32,
-    last_total_tokens: i32,
+    counters: UsageCounters,
     cached_tool_defs: Vec<ToolDef>,
 
     working_messages: Vec<Message>,
 
-    cached_ancestry_msgs: Vec<Message>,
-    cached_ancestry_turn_id: String,
+    compaction: CompactionState,
 
-    subagents: HashMap<String, SubagentDef>,
-    subagent_turns: Vec<SubagentTurn>,
+    subagents_state: SubagentState,
 
-    is_subagent: bool,
     last_prompt: String,
     captured_msgs: Vec<Message>,
-
-    compaction_client: Option<Arc<dyn ChatClient>>,
-    compacting: bool,
-    compacted_summary: String,
-    compacted_up_to: String,
 }
 
 // ── build_system_prompt ──────────────────────────────────────────────────
@@ -219,7 +275,7 @@ pub fn build_system_prompt(
         sb.push_str(system_prefix);
         sb.push_str("\n\n");
     }
-    sb.push_str(TOOL_RULES_PROMPT);
+    sb.push_str(&tool_rules_prompt());
     if !global_md.is_empty() {
         sb.push_str("\n\n## User conventions\n");
         sb.push_str(global_md);
@@ -247,14 +303,14 @@ impl AgentSession {
         let date_str = now.format("%Y-%m-%d (%A)").to_string();
         let system_msg = format!("CWD: {}\nDate: {}\n\n{}", cwd, date_str, system_prompt);
         let cached_tool_defs = registry.tool_defs();
+        let prompt_tokens = sess.prompt_tokens;
+        let completion_tokens = sess.completion_tokens;
+        let cost = sess.cost;
+        let context_tokens = sess.context_tokens;
+        let compacted_summary = sess.compacted_summary.clone();
+        let compacted_up_to = sess.compacted_up_to.clone();
 
         AgentSession {
-            total_prompt_tokens: sess.prompt_tokens,
-            total_completion_tokens: sess.completion_tokens,
-            total_cost: sess.cost,
-            last_total_tokens: sess.context_tokens,
-            compacted_summary: sess.compacted_summary.clone(),
-            compacted_up_to: sess.compacted_up_to.clone(),
             store,
             sess,
             tools: registry,
@@ -262,18 +318,30 @@ impl AgentSession {
             system_msg,
             max_rounds,
             cwd,
-            last_request_tokens: 0,
+            counters: UsageCounters {
+                total_prompt_tokens: prompt_tokens,
+                total_completion_tokens: completion_tokens,
+                total_cost: cost,
+                last_request_tokens: 0,
+                last_total_tokens: context_tokens,
+            },
             cached_tool_defs,
             working_messages: Vec::new(),
-            cached_ancestry_msgs: Vec::new(),
-            cached_ancestry_turn_id: String::new(),
-            subagents: HashMap::new(),
-            subagent_turns: Vec::new(),
-            is_subagent: false,
+            compaction: CompactionState {
+                cached_ancestry_msgs: Vec::new(),
+                cached_ancestry_turn_id: String::new(),
+                compaction_client: None,
+                compacting: false,
+                compacted_summary,
+                compacted_up_to,
+            },
+            subagents_state: SubagentState {
+                subagents: HashMap::new(),
+                subagent_turns: Vec::new(),
+                is_subagent: false,
+            },
             last_prompt: String::new(),
             captured_msgs: Vec::new(),
-            compaction_client: None,
-            compacting: false,
         }
     }
 
@@ -283,12 +351,12 @@ impl AgentSession {
         self.sess.clone()
     }
     pub fn reload_from(&mut self, sess: Session) {
-        self.total_prompt_tokens = sess.prompt_tokens;
-        self.total_completion_tokens = sess.completion_tokens;
-        self.total_cost = sess.cost;
-        self.last_total_tokens = sess.context_tokens;
-        self.compacted_summary = sess.compacted_summary.clone();
-        self.compacted_up_to = sess.compacted_up_to.clone();
+        self.counters.total_prompt_tokens = sess.prompt_tokens;
+        self.counters.total_completion_tokens = sess.completion_tokens;
+        self.counters.total_cost = sess.cost;
+        self.counters.last_total_tokens = sess.context_tokens;
+        self.compaction.compacted_summary = sess.compacted_summary.clone();
+        self.compaction.compacted_up_to = sess.compacted_up_to.clone();
         self.sess = sess;
     }
     pub fn system_prompt(&self) -> &str {
@@ -298,7 +366,7 @@ impl AgentSession {
         self.client.context_window()
     }
     pub fn context_tokens(&self) -> i32 {
-        self.last_total_tokens
+        self.counters.last_total_tokens
     }
     pub fn tool_defs(&self) -> Vec<ToolDef> {
         self.cached_tool_defs.clone()
@@ -316,13 +384,13 @@ impl AgentSession {
             .iter()
             .map(|(k, v)| (k.clone(), v.description.clone()))
             .collect();
-        self.subagents = defs;
+        self.subagents_state.subagents = defs;
         self.cached_tool_defs
             .push(build_delegate_def(&names, &descriptions));
     }
 
     pub fn set_compaction_client(&mut self, client: Arc<dyn ChatClient>) {
-        self.compaction_client = Some(client);
+        self.compaction.compaction_client = Some(client);
     }
 
     pub fn set_client(&mut self, client: Arc<dyn ChatClient>) {
@@ -356,17 +424,18 @@ impl AgentSession {
     }
 
     pub fn compact(&self) -> Result<mpsc::Receiver<Event>, String> {
-        if self.compaction_client.is_none() {
+        if self.compaction.compaction_client.is_none() {
             return Err("no compaction client configured".into());
         }
         let (tx, rx) = mpsc::channel(100);
         let mut s = self.clone();
         tokio::spawn(async move {
-            s.compacting = true;
+            s.compaction.compacting = true;
             let _ = tx
                 .send(Event {
-                    event_type: "compacting_start".into(),
-                    ..Default::default()
+                    kind: EventKind::CompactingStart,
+                    subagent: String::new(),
+                    subagent_id: String::new(),
                 })
                 .await;
             let turns = {
@@ -388,36 +457,6 @@ impl AgentSession {
         Ok(rx)
     }
 
-    fn clone(&self) -> Self {
-        AgentSession {
-            store: self.store.clone(),
-            sess: self.sess.clone(),
-            tools: self.tools.clone(),
-            client: self.client.clone(),
-            system_msg: self.system_msg.clone(),
-            max_rounds: self.max_rounds,
-            cwd: self.cwd.clone(),
-            total_prompt_tokens: self.total_prompt_tokens,
-            total_completion_tokens: self.total_completion_tokens,
-            total_cost: self.total_cost,
-            last_request_tokens: self.last_request_tokens,
-            last_total_tokens: self.last_total_tokens,
-            cached_tool_defs: self.cached_tool_defs.clone(),
-            working_messages: self.working_messages.clone(),
-            cached_ancestry_msgs: self.cached_ancestry_msgs.clone(),
-            cached_ancestry_turn_id: self.cached_ancestry_turn_id.clone(),
-            subagents: self.subagents.clone(),
-            subagent_turns: self.subagent_turns.clone(),
-            is_subagent: self.is_subagent,
-            last_prompt: self.last_prompt.clone(),
-            captured_msgs: self.captured_msgs.clone(),
-            compaction_client: self.compaction_client.clone(),
-            compacting: self.compacting,
-            compacted_summary: self.compacted_summary.clone(),
-            compacted_up_to: self.compacted_up_to.clone(),
-        }
-    }
-
     // ══════════════════════════════════════════════════════════════════════
     //  RUN LOOP
     // ══════════════════════════════════════════════════════════════════════
@@ -425,7 +464,7 @@ impl AgentSession {
     async fn run_loop(&mut self, user_text: &str, events: &mpsc::Sender<Event>) {
         let loop_start = std::time::Instant::now();
         self.working_messages.clear();
-        self.subagent_turns.clear();
+        self.subagents_state.subagent_turns.clear();
         let parent_id = self.sess.current_turn.clone();
 
         self.working_messages.push(Message {
@@ -463,8 +502,8 @@ impl AgentSession {
                 }
             }
         };
-        self.cached_ancestry_msgs = ancestry_msgs.clone();
-        self.cached_ancestry_turn_id = parent_id.clone();
+        self.compaction.cached_ancestry_msgs = ancestry_msgs.clone();
+        self.compaction.cached_ancestry_turn_id = parent_id.clone();
 
         for round in 1..=self.max_rounds {
             let req = self.build_request(&ancestry_msgs);
@@ -646,57 +685,37 @@ impl AgentSession {
         };
 
         while let Some(ev) = rx.recv().await {
-            if let Some(ref err) = ev.error {
-                return Err(err.clone());
-            }
-
-            match ev.event_type.as_str() {
-                "text_delta" => {
-                    result.content.push_str(&ev.delta);
-                    let _ = events.send(Event::text_delta(&ev.delta)).await;
+            match ev {
+                StreamEvent::Error { error } => return Err(error),
+                StreamEvent::TextDelta { delta } => {
+                    result.content.push_str(&delta);
+                    let _ = events.send(Event::text_delta(&delta)).await;
                 }
-                "reasoning_delta" => {
-                    result.reasoning.push_str(&ev.reasoning_delta);
-                    let _ = events
-                        .send(Event::reasoning_delta(&ev.reasoning_delta))
-                        .await;
+                StreamEvent::ReasoningDelta { delta } => {
+                    result.reasoning.push_str(&delta);
+                    let _ = events.send(Event::reasoning_delta(&delta)).await;
                 }
-                "tool_call" => {
-                    if let Some(ref tc) = ev.tool_call {
-                        result.tool_calls.push(tc.clone());
+                StreamEvent::ToolCall { call } => {
+                    result.tool_calls.push(call);
+                }
+                StreamEvent::Usage { usage } => {
+                    self.counters.total_prompt_tokens += usage.prompt_tokens;
+                    self.counters.total_completion_tokens += usage.completion_tokens;
+                    self.counters.last_request_tokens = usage.prompt_tokens;
+                    self.counters.last_total_tokens = usage.total_tokens;
+                    if self.counters.last_total_tokens == 0 {
+                        self.counters.last_total_tokens =
+                            usage.prompt_tokens + usage.completion_tokens;
                     }
+                    self.counters.total_cost += self.client.cost_for(&usage);
+                    let _ = events.send(Event::usage_ev(usage)).await;
                 }
-                "usage" => {
-                    if let Some(ref usage) = ev.usage {
-                        self.total_prompt_tokens += usage.prompt_tokens;
-                        self.total_completion_tokens += usage.completion_tokens;
-                        self.last_request_tokens = usage.prompt_tokens;
-                        self.last_total_tokens = usage.total_tokens;
-                        if self.last_total_tokens == 0 {
-                            self.last_total_tokens = usage.prompt_tokens + usage.completion_tokens;
-                        }
-                        if usage.cost > 0.0 {
-                            self.total_cost += usage.cost;
-                        } else {
-                            let (in_p, cache_p, out_p) = self.client.pricing();
-                            if in_p > 0.0 || cache_p > 0.0 || out_p > 0.0 {
-                                let cached = usage.prompt_cache_hit_tokens.min(usage.prompt_tokens);
-                                let non_cached = usage.prompt_tokens - cached;
-                                self.total_cost += non_cached as f64 * in_p / 1e6
-                                    + cached as f64 * cache_p / 1e6
-                                    + usage.completion_tokens as f64 * out_p / 1e6;
-                            }
-                        }
-                        let _ = events.send(Event::usage_ev(usage.clone())).await;
-                    }
+                StreamEvent::ReasoningDetails { details } => {
+                    result.reasoning_details = details;
                 }
-                "reasoning_details" => {
-                    result.reasoning_details = ev.reasoning_details.clone();
+                StreamEvent::FinishReason { reason } => {
+                    result.finish_reason = reason;
                 }
-                "finish_reason" => {
-                    result.finish_reason = ev.finish_reason.clone();
-                }
-                _ => {}
             }
         }
         Ok(result)
@@ -723,8 +742,8 @@ impl AgentSession {
             let tc = tc.clone();
             let events = events.clone();
 
-            if tc.name == "delegate" && !self.subagents.is_empty() {
-                let subagents = self.subagents.clone();
+            if tc.name == "delegate" && !self.subagents_state.subagents.is_empty() {
+                let subagents = self.subagents_state.subagents.clone();
                 let store = self.store.clone();
                 let sess_id = self.sess.id.clone();
                 let max_rounds = self.max_rounds;
@@ -753,10 +772,17 @@ impl AgentSession {
                             (i, msg, String::new(), true, None)
                         }
                         Some(tool) => {
-                            let args: serde_json::Value =
-                                serde_json::from_str(&tc.arguments).unwrap_or_default();
+                            let args: serde_json::Value = match serde_json::from_str(&tc.arguments)
+                            {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    let msg = format!("Tool {} invalid args: {}", tc.name, e);
+                                    let dur = format_duration(start.elapsed());
+                                    return (i, msg, dur, true, None);
+                                }
+                            };
                             let tool_result = tokio::time::timeout(
-                                Duration::from_secs(120),
+                                Duration::from_secs(TOOL_TIMEOUT_SECS),
                                 (tool.execute)(args),
                             )
                             .await;
@@ -774,7 +800,10 @@ impl AgentSession {
                                     (i, msg, dur, true, None)
                                 }
                                 Err(_) => {
-                                    let msg = format!("Tool {} timed out after 120s", tc.name);
+                                    let msg = format!(
+                                        "Tool {} timed out after {}s",
+                                        tc.name, TOOL_TIMEOUT_SECS
+                                    );
                                     (i, msg, dur, true, None)
                                 }
                             }
@@ -808,10 +837,10 @@ impl AgentSession {
                     ));
                 }
                 if let Some(dd) = delegate_data {
-                    self.total_prompt_tokens += dd.prompt_tokens;
-                    self.total_completion_tokens += dd.completion_tokens;
-                    self.total_cost += dd.cost;
-                    self.subagent_turns.push(SubagentTurn {
+                    self.counters.total_prompt_tokens += dd.prompt_tokens;
+                    self.counters.total_completion_tokens += dd.completion_tokens;
+                    self.counters.total_cost += dd.cost;
+                    self.subagents_state.subagent_turns.push(SubagentTurn {
                         msgs: dd.msgs,
                         subagent: dd.subagent_id,
                         tool_call_id: dd.tool_call_id,
@@ -881,7 +910,7 @@ impl AgentSession {
     // ── commit_turn ──────────────────────────────────────────────────────
 
     async fn commit_turn(&mut self, parent_id: &str) {
-        if self.is_subagent {
+        if self.subagents_state.is_subagent {
             self.captured_msgs = self.working_messages.clone();
             self.working_messages.clear();
             return;
@@ -901,7 +930,7 @@ impl AgentSession {
             let mut store = self.store.lock().await;
             let _ = store.commit_turn(&self.sess.id, &turn);
 
-            for st in &self.subagent_turns {
+            for st in &self.subagents_state.subagent_turns {
                 let sub_id = compute_turn_id(&turn_id, &st.msgs);
                 let sub_turn = Turn {
                     id: sub_id,
@@ -916,13 +945,14 @@ impl AgentSession {
         }
 
         self.sess.current_turn = turn_id;
-        self.cached_ancestry_turn_id.clear();
+        self.compaction.cached_ancestry_turn_id.clear();
         self.sess.turn_count += 1;
-        self.sess.prompt_tokens = self.total_prompt_tokens;
-        self.sess.completion_tokens = self.total_completion_tokens;
-        self.sess.total_tokens = self.total_prompt_tokens + self.total_completion_tokens;
-        self.sess.context_tokens = self.last_total_tokens;
-        self.sess.cost = self.total_cost;
+        self.sess.prompt_tokens = self.counters.total_prompt_tokens;
+        self.sess.completion_tokens = self.counters.total_completion_tokens;
+        self.sess.total_tokens =
+            self.counters.total_prompt_tokens + self.counters.total_completion_tokens;
+        self.sess.context_tokens = self.counters.last_total_tokens;
+        self.sess.cost = self.counters.total_cost;
 
         if !self.sess.named {
             let label = turn_label(&self.working_messages);
@@ -932,8 +962,8 @@ impl AgentSession {
             }
         }
 
-        self.sess.compacted_summary = self.compacted_summary.clone();
-        self.sess.compacted_up_to = self.compacted_up_to.clone();
+        self.sess.compacted_summary = self.compaction.compacted_summary.clone();
+        self.sess.compacted_up_to = self.compaction.compacted_up_to.clone();
 
         {
             let mut store = self.store.lock().await;
@@ -946,13 +976,15 @@ impl AgentSession {
     // ── compact_ancestry ─────────────────────────────────────────────────
 
     async fn compact_ancestry(&mut self, turns: &[Turn], force: bool) -> Vec<Message> {
-        let compaction_client = match &self.compaction_client {
+        let compaction_client = match &self.compaction.compaction_client {
             Some(cc) => cc,
             None => return flatten_turns(turns),
         };
 
         let ctx_window = self.client.context_window();
-        let above_threshold = force || self.last_total_tokens > ctx_window * 7 / 10;
+        let above_threshold = force
+            || self.counters.last_total_tokens
+                > ctx_window * COMPACTION_THRESHOLD_NUM / COMPACTION_THRESHOLD_DEN;
         let keep_turns = compute_keep_turns(turns, ctx_window);
 
         if force && turns.len() <= 1 {
@@ -961,7 +993,7 @@ impl AgentSession {
 
         let force_keep = if force { 0 } else { keep_turns };
 
-        if self.compacted_summary.is_empty() {
+        if self.compaction.compacted_summary.is_empty() {
             if !above_threshold {
                 return flatten_turns(turns);
             }
@@ -976,8 +1008,8 @@ impl AgentSession {
             return match call_compaction(compaction_client, &build_summarization_prompt(old)).await
             {
                 Ok(summary) => {
-                    self.compacted_summary = summary.clone();
-                    self.compacted_up_to = old[old.len() - 1].id.clone();
+                    self.compaction.compacted_summary = summary.clone();
+                    self.compaction.compacted_up_to = old[old.len() - 1].id.clone();
                     build_compacted_messages(&summary, &flatten_turns(recent))
                 }
                 Err(e) => {
@@ -987,10 +1019,13 @@ impl AgentSession {
             };
         }
 
-        let new_turns = turns_after_id(turns, &self.compacted_up_to);
+        let new_turns = turns_after_id(turns, &self.compaction.compacted_up_to);
         if new_turns.is_empty() {
             if turns.len() <= force_keep {
-                return build_compacted_messages(&self.compacted_summary, &flatten_turns(turns));
+                return build_compacted_messages(
+                    &self.compaction.compacted_summary,
+                    &flatten_turns(turns),
+                );
             }
             let split = turns.len() - force_keep;
             let old = &turns[..split];
@@ -998,24 +1033,33 @@ impl AgentSession {
             return match call_compaction(compaction_client, &build_summarization_prompt(old)).await
             {
                 Ok(summary) => {
-                    self.compacted_summary = summary.clone();
-                    self.compacted_up_to = old[old.len() - 1].id.clone();
+                    self.compaction.compacted_summary = summary.clone();
+                    self.compaction.compacted_up_to = old[old.len() - 1].id.clone();
                     build_compacted_messages(&summary, &flatten_turns(recent))
                 }
                 Err(e) => {
                     log::warn!("compaction failed, reusing stale summary error={}", e);
-                    build_compacted_messages(&self.compacted_summary, &flatten_turns(turns))
+                    build_compacted_messages(
+                        &self.compaction.compacted_summary,
+                        &flatten_turns(turns),
+                    )
                 }
             };
         }
 
         if !above_threshold {
-            return build_compacted_messages(&self.compacted_summary, &flatten_turns(new_turns));
+            return build_compacted_messages(
+                &self.compaction.compacted_summary,
+                &flatten_turns(new_turns),
+            );
         }
 
         let keep_new = compute_keep_turns(new_turns, ctx_window);
         if new_turns.len() <= keep_new {
-            return build_compacted_messages(&self.compacted_summary, &flatten_turns(new_turns));
+            return build_compacted_messages(
+                &self.compaction.compacted_summary,
+                &flatten_turns(new_turns),
+            );
         }
 
         let split = new_turns.len() - keep_new;
@@ -1024,18 +1068,21 @@ impl AgentSession {
 
         match call_compaction(
             compaction_client,
-            &build_incremental_summary_prompt(&self.compacted_summary, summary_turns),
+            &build_incremental_summary_prompt(&self.compaction.compacted_summary, summary_turns),
         )
         .await
         {
             Ok(summary) => {
-                self.compacted_summary = summary.clone();
-                self.compacted_up_to = summary_turns[summary_turns.len() - 1].id.clone();
+                self.compaction.compacted_summary = summary.clone();
+                self.compaction.compacted_up_to = summary_turns[summary_turns.len() - 1].id.clone();
                 build_compacted_messages(&summary, &flatten_turns(recent_turns))
             }
             Err(e) => {
                 log::warn!("compaction failed, reusing stale summary error={}", e);
-                build_compacted_messages(&self.compacted_summary, &flatten_turns(new_turns))
+                build_compacted_messages(
+                    &self.compaction.compacted_summary,
+                    &flatten_turns(new_turns),
+                )
             }
         }
     }
@@ -1093,7 +1140,7 @@ fn truncate_for_summary(s: &str, max_len: usize) -> String {
 }
 
 fn compute_keep_turns(turns: &[Turn], context_window: i32) -> usize {
-    let budget = context_window / 3;
+    let budget = context_window / COMPACTION_BUDGET_DIVISOR;
     let mut total: i32 = 0;
     let mut kept: usize = 0;
     for t in turns.iter().rev() {
@@ -1261,24 +1308,30 @@ fn run_delegate(
             system_msg,
             max_rounds,
             cwd,
-            is_subagent: true,
+            counters: UsageCounters {
+                total_prompt_tokens: 0,
+                total_completion_tokens: 0,
+                total_cost: 0.0,
+                last_request_tokens: 0,
+                last_total_tokens: 0,
+            },
             cached_tool_defs: def.registry.tool_defs(),
-            total_prompt_tokens: 0,
-            total_completion_tokens: 0,
-            total_cost: 0.0,
-            last_request_tokens: 0,
-            last_total_tokens: 0,
             working_messages: Vec::new(),
-            cached_ancestry_msgs: Vec::new(),
-            cached_ancestry_turn_id: String::new(),
-            subagents: HashMap::new(),
-            subagent_turns: Vec::new(),
+            compaction: CompactionState {
+                cached_ancestry_msgs: Vec::new(),
+                cached_ancestry_turn_id: String::new(),
+                compaction_client: None,
+                compacting: false,
+                compacted_summary: String::new(),
+                compacted_up_to: String::new(),
+            },
+            subagents_state: SubagentState {
+                subagents: HashMap::new(),
+                subagent_turns: Vec::new(),
+                is_subagent: true,
+            },
             last_prompt: String::new(),
             captured_msgs: Vec::new(),
-            compaction_client: None,
-            compacting: false,
-            compacted_summary: String::new(),
-            compacted_up_to: String::new(),
         };
 
         let (event_tx, mut event_rx) = mpsc::channel(100);
@@ -1288,9 +1341,9 @@ fn run_delegate(
         let join_handle = tokio::spawn(async move {
             sub.run_loop(&task_text, &event_tx).await;
             (
-                sub.total_prompt_tokens,
-                sub.total_completion_tokens,
-                sub.total_cost,
+                sub.counters.total_prompt_tokens,
+                sub.counters.total_completion_tokens,
+                sub.counters.total_cost,
                 sub.captured_msgs,
                 sub.working_messages,
             )
@@ -1298,9 +1351,12 @@ fn run_delegate(
 
         let mut had_error = false;
         while let Some(mut ev) = event_rx.recv().await {
-            match ev.event_type.as_str() {
-                "agent_done" | "usage" | "text_delta" | "reasoning_delta" => {}
-                "error" => {
+            match ev.kind {
+                EventKind::AgentDone(_)
+                | EventKind::Usage(_)
+                | EventKind::TextDelta(_)
+                | EventKind::ReasoningDelta(_) => {}
+                EventKind::Error(_) => {
                     had_error = true;
                     ev.subagent = sub_id.clone();
                     ev.subagent_id = tc_id.clone();
@@ -1445,11 +1501,11 @@ async fn call_compaction(client: &Arc<dyn ChatClient>, prompt: &str) -> Result<S
     let mut rx = client.chat(req).await.map_err(|e| e.to_string())?;
     let mut result = String::new();
     while let Some(ev) = rx.recv().await {
-        if let Some(err) = ev.error {
-            return Err(err.to_string());
+        if let StreamEvent::Error { error } = ev {
+            return Err(error.to_string());
         }
-        if ev.event_type == "text_delta" {
-            result.push_str(&ev.delta);
+        if let StreamEvent::TextDelta { delta } = ev {
+            result.push_str(&delta);
         }
     }
     Ok(result)
@@ -1523,39 +1579,22 @@ mod tests {
     use std::time::Duration;
 
     fn se(event_type: &str, delta: &str) -> StreamEvent {
-        StreamEvent {
-            event_type: event_type.to_string(),
-            delta: delta.to_string(),
-            reasoning_delta: String::new(),
-            reasoning_details: vec![],
-            tool_call: None,
-            usage: None,
-            finish_reason: String::new(),
-            error: None,
+        match event_type {
+            "text_delta" => StreamEvent::TextDelta {
+                delta: delta.to_string(),
+            },
+            "reasoning_delta" => StreamEvent::ReasoningDelta {
+                delta: delta.to_string(),
+            },
+            _ => panic!("unknown event_type: {}", event_type),
         }
     }
     fn se_tool(tc: StreamToolCall) -> StreamEvent {
-        StreamEvent {
-            event_type: "tool_call".to_string(),
-            delta: String::new(),
-            reasoning_delta: String::new(),
-            reasoning_details: vec![],
-            tool_call: Some(tc),
-            usage: None,
-            finish_reason: String::new(),
-            error: None,
-        }
+        StreamEvent::ToolCall { call: tc }
     }
     fn se_finish(reason: &str) -> StreamEvent {
-        StreamEvent {
-            event_type: "finish_reason".to_string(),
-            delta: String::new(),
-            reasoning_delta: String::new(),
-            reasoning_details: vec![],
-            tool_call: None,
-            usage: None,
-            finish_reason: reason.to_string(),
-            error: None,
+        StreamEvent::FinishReason {
+            reason: reason.to_string(),
         }
     }
 
@@ -1787,13 +1826,15 @@ mod tests {
         let mut delegate_result = String::new();
         let mut final_text = String::new();
         while let Some(ev) = rx.recv().await {
-            if ev.event_type == "tool_result" && ev.tool_call_name == "delegate" {
-                delegate_result = ev.tool_result.clone();
+            if let EventKind::ToolResult { name, result, .. } = &ev.kind {
+                if name == "delegate" {
+                    delegate_result = result.clone();
+                }
             }
-            if ev.event_type == "text_delta" {
-                final_text.push_str(&ev.delta);
+            if let EventKind::TextDelta(delta) = &ev.kind {
+                final_text.push_str(delta);
             }
-            if ev.event_type == "agent_done" {
+            if matches!(&ev.kind, EventKind::AgentDone(_)) {
                 break;
             }
         }
@@ -1887,13 +1928,15 @@ mod tests {
         let mut delegate_result = String::new();
         let mut final_text = String::new();
         while let Some(ev) = rx.recv().await {
-            if ev.event_type == "tool_result" && ev.tool_call_name == "delegate" {
-                delegate_result = ev.tool_result.clone();
+            if let EventKind::ToolResult { name, result, .. } = &ev.kind {
+                if name == "delegate" {
+                    delegate_result = result.clone();
+                }
             }
-            if ev.event_type == "text_delta" {
-                final_text.push_str(&ev.delta);
+            if let EventKind::TextDelta(delta) = &ev.kind {
+                final_text.push_str(delta);
             }
-            if ev.event_type == "agent_done" {
+            if matches!(&ev.kind, EventKind::AgentDone(_)) {
                 break;
             }
         }
