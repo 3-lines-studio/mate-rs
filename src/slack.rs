@@ -2,6 +2,8 @@ use crate::core::session_manager::SessionManager;
 use crate::core::{Deps, Interface, Notifier};
 use crate::markdown::{slack::markdown_to_slack, split_text};
 use futures_util::{SinkExt, StreamExt};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,6 +15,9 @@ const SLACK_TEXT_LIMIT: usize = 3500;
 const FLUSH_INTERVAL: Duration = Duration::from_millis(800);
 const TRUNCATION_NOTE: &str = "\n\n> _...message continues..._";
 const PROMPT_CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
+
+static IMG_EXT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"[\w./\-]+\.(?:png|jpg|jpeg|gif|webp)").unwrap());
 
 fn api_url(method: &str) -> String {
     format!("https://www.slack.com/api/{}", method)
@@ -216,6 +221,23 @@ struct ActivePrompt {
     done: oneshot::Receiver<()>,
 }
 
+fn collect_images(images: &mut Vec<String>, sources: &[&str]) {
+    for src in sources {
+        for m in IMG_EXT_RE.find_iter(src) {
+            let path = std::path::Path::new(m.as_str())
+                .components()
+                .collect::<std::path::PathBuf>();
+            let path_str = path.to_string_lossy().to_string();
+            if !std::path::Path::new(&path_str).exists() {
+                continue;
+            }
+            if !images.contains(&path_str) {
+                images.push(path_str);
+            }
+        }
+    }
+}
+
 struct BotInner {
     client: reqwest::Client,
     bot_token: String,
@@ -384,6 +406,7 @@ impl BotInner {
 
         let mut full_text = String::new();
         let mut last_flush = Instant::now();
+        let mut images: Vec<String> = Vec::new();
 
         loop {
             tokio::select! {
@@ -394,6 +417,9 @@ impl BotInner {
                             "error" => {
                                 full_text.push_str("\n\nError: ");
                                 full_text.push_str(&ev.error);
+                            }
+                            "tool_result" => {
+                                collect_images(&mut images, &[&ev.tool_call_args, &ev.tool_result]);
                             }
                             _ => {}
                         },
@@ -426,6 +452,8 @@ impl BotInner {
             .await;
         }
 
+        self.upload_images(&channel, &thread_ts, &images).await;
+
         {
             let sess = sess_arc.lock().unwrap();
             let mut mgr = self.manager.lock().unwrap();
@@ -434,6 +462,48 @@ impl BotInner {
 
         self.active_prompts.lock().unwrap().remove(&session_key);
         let _ = done_tx.send(());
+    }
+
+    async fn upload_images(&self, channel: &str, thread_ts: &str, images: &[String]) {
+        for img_path in images {
+            let path = std::path::Path::new(img_path);
+            let filename = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            let file_body = match std::fs::read(path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+
+            let part = reqwest::multipart::Part::bytes(file_body).file_name(filename.to_string());
+
+            let form = reqwest::multipart::Form::new()
+                .part("file", part)
+                .text("channels", channel.to_string())
+                .text("thread_ts", thread_ts.to_string());
+
+            let resp = self
+                .client
+                .post(api_url("files.upload"))
+                .header("Authorization", format!("Bearer {}", self.bot_token))
+                .multipart(form)
+                .timeout(Duration::from_secs(60))
+                .send()
+                .await;
+
+            match resp {
+                Ok(r) if r.status().is_success() => {
+                    let _ = std::fs::remove_file(path);
+                }
+                Ok(r) => {
+                    log::error!("slack upload {}: HTTP {}", filename, r.status());
+                }
+                Err(e) => {
+                    log::error!("slack upload {}: {}", filename, e);
+                }
+            }
+        }
     }
 }
 
@@ -749,5 +819,28 @@ mod tests {
             event.thread_ts.clone()
         };
         assert_eq!(key, "123.456");
+    }
+
+    #[test]
+    fn test_collect_images() {
+        use std::fs;
+        let dir = std::env::temp_dir();
+        let p1 = dir.join(format!("mate_test_collect_{}_a.png", std::process::id()));
+        let p2 = dir.join(format!("mate_test_collect_{}_b.jpg", std::process::id()));
+        fs::write(&p1, b"x").unwrap();
+        fs::write(&p2, b"x").unwrap();
+        let p1s = p1.to_string_lossy().to_string();
+        let p2s = p2.to_string_lossy().to_string();
+
+        let mut images = Vec::new();
+        let src = format!("result: {} and {} also {}", p1s, p2s, p2s);
+        collect_images(&mut images, &[&src, "/nonexistent/missing.png"]);
+
+        assert_eq!(images.len(), 2);
+        assert!(images.contains(&p1s));
+        assert!(images.contains(&p2s));
+
+        let _ = fs::remove_file(&p1);
+        let _ = fs::remove_file(&p2);
     }
 }

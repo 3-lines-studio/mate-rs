@@ -55,7 +55,12 @@ async fn execute_webfetch(mut p: WebFetchParams) -> Result<String, String> {
     let result = fetch_http(&p.url, p.max_size).await?;
 
     if looks_like_spa_shell(&result) {
-        return Ok(result);
+        let max_size = p.max_size as usize;
+        let url = p.url.clone();
+        match tokio::task::spawn_blocking(move || render_js_blocking(&url, max_size)).await {
+            Ok(Ok(rendered)) => return Ok(rendered),
+            _ => return Ok(result),
+        }
     }
 
     let is_html = result
@@ -353,6 +358,46 @@ fn remove_blocks_for_detection(s: &str, tag: &str) -> String {
     }
 
     s
+}
+
+fn render_js_blocking(url: &str, max_size: usize) -> Result<String, String> {
+    use headless_chrome::LaunchOptionsBuilder;
+    use std::time::Duration;
+
+    let launch_opts = LaunchOptionsBuilder::default()
+        .headless(true)
+        .sandbox(false)
+        .enable_gpu(false)
+        .idle_browser_timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("browser: {}", e))?;
+
+    let browser =
+        headless_chrome::Browser::new(launch_opts).map_err(|e| format!("browser: {}", e))?;
+
+    let tab = browser.new_tab().map_err(|e| format!("browser: {}", e))?;
+
+    tab.navigate_to(url)
+        .map_err(|e| format!("browser: {}", e))?;
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    let html = tab.get_content().map_err(|e| format!("browser: {}", e))?;
+
+    let display: &str = if html.len() <= max_size {
+        &html
+    } else {
+        let mut end = max_size;
+        while !html.is_char_boundary(end) {
+            end -= 1;
+        }
+        &html[..end]
+    };
+
+    Ok(format!(
+        "Rendered via headless browser\nURL: {}\n\n{}",
+        url, display
+    ))
 }
 
 #[cfg(test)]
