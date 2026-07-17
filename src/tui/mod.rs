@@ -3,6 +3,7 @@ pub mod chat_dropdowns;
 pub mod chat_format;
 pub mod chat_handlers;
 pub mod chat_render;
+pub mod config_editor;
 pub mod file_picker;
 pub mod session_list;
 pub mod theme;
@@ -16,15 +17,18 @@ use crossterm::event::{
     Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chat::{ChatScreen, Modal};
 use chat_render::{render_shortcuts_bar, render_top_bar};
+use config_editor::ConfigScreen;
 use session_list::SessionListScreen;
 
 enum AppState {
     SessionList,
     Chat,
+    Config,
     ConfirmDelete(Session),
 }
 
@@ -33,6 +37,7 @@ pub struct App {
     deps: Deps,
     session_list: SessionListScreen,
     chat: ChatScreen,
+    config_screen: ConfigScreen,
     should_quit: bool,
 }
 
@@ -44,11 +49,13 @@ impl App {
             deps.config.tui.show_thinking,
             deps.config.tui.tools_expanded,
         );
+        let config_screen = ConfigScreen::new(deps.config_dir.clone());
         App {
             state: AppState::SessionList,
             deps,
             session_list: SessionListScreen::new(),
             chat,
+            config_screen,
             should_quit: false,
         }
     }
@@ -152,6 +159,9 @@ impl App {
             AppState::Chat => {
                 self.chat.render(f);
             }
+            AppState::Config => {
+                self.config_screen.render(f);
+            }
             AppState::ConfirmDelete(ref session) => {
                 let name = &session.name;
                 let dialog = format!("Delete \"{}\"?\n\n[y] yes  [n] no  [esc] cancel", name);
@@ -185,6 +195,11 @@ impl App {
                 let alt = key.modifiers.contains(KeyModifiers::ALT);
 
                 match self.state {
+                    AppState::Config => {
+                        if let Some(true) = self.config_screen.handle_key(key) {
+                            self.state = AppState::SessionList;
+                        }
+                    }
                     AppState::ConfirmDelete(_) => match code {
                         KeyCode::Char('y') => {
                             if let AppState::ConfirmDelete(ref sess) = self.state {
@@ -302,6 +317,15 @@ impl App {
                                     self.chat.close_dropdowns();
                                     let val = format!("{} ", path);
                                     self.chat.set_text(&val);
+                                }
+                            }
+                            (false, false, KeyCode::Enter)
+                                if self.chat.active_modal == Modal::Model =>
+                            {
+                                if let Some((_, id)) = self.chat.model_dropdown.selected_item() {
+                                    let id = id.clone();
+                                    self.chat.close_dropdowns();
+                                    self.switch_model(&id);
                                 }
                             }
                             (true, false, KeyCode::Char('p')) => {
@@ -454,6 +478,7 @@ impl App {
                 Modal::Template => self.chat.template_dropdown.up(),
                 Modal::File => self.chat.file_dropdown.up(),
                 Modal::Command => self.chat.command_dropdown.up(),
+                Modal::Model => self.chat.model_dropdown.up(),
                 Modal::Tree => self.chat.tree_dropdown.up(),
                 _ => {}
             },
@@ -461,6 +486,7 @@ impl App {
                 Modal::Template => self.chat.template_dropdown.down(),
                 Modal::File => self.chat.file_dropdown.down(),
                 Modal::Command => self.chat.command_dropdown.down(),
+                Modal::Model => self.chat.model_dropdown.down(),
                 Modal::Tree => self.chat.tree_dropdown.down(),
                 _ => {}
             },
@@ -476,6 +502,10 @@ impl App {
                     self.chat.insert_char(c);
                     let query = self.chat.textarea_value().to_string();
                     self.chat.filter_file_dropdown(&query);
+                } else if self.chat.active_modal == Modal::Command {
+                    self.chat.command_query.push(c);
+                    self.chat.command_dropdown.selected = 0;
+                    self.chat.filter_command_dropdown();
                 }
             }
             KeyCode::Backspace => {
@@ -487,6 +517,9 @@ impl App {
                     self.chat.delete_before_cursor();
                     let query = self.chat.textarea_value().to_string();
                     self.chat.filter_file_dropdown(&query);
+                } else if self.chat.active_modal == Modal::Command {
+                    self.chat.command_query.pop();
+                    self.chat.filter_command_dropdown();
                 }
             }
             _ => {}
@@ -661,10 +694,40 @@ impl App {
                     self.chat.compact_session();
                 }
             }
+            "config" => {
+                self.config_screen.reload();
+                self.state = AppState::Config;
+            }
+            "model" => {
+                self.chat.open_model_dropdown(&self.deps.config.models);
+            }
             "quit" => {
                 self.should_quit = true;
             }
             _ => {}
+        }
+    }
+
+    fn switch_model(&mut self, model_id: &str) {
+        let verbose = self.deps.client.debug_enabled();
+        match crate::core::resolve::resolve_client(
+            model_id,
+            &self.deps.config.models,
+            &self.deps.config.providers,
+            verbose,
+        ) {
+            Ok((client, model_name)) => {
+                self.deps.client = client;
+                self.deps.model_name = model_name.clone();
+                self.chat.model_name = model_name;
+                if let Some(ref mut asession) = self.chat.active_session {
+                    asession.set_client(Arc::new(self.deps.client.clone()));
+                    self.chat.context_window = asession.context_window();
+                }
+            }
+            Err(e) => {
+                self.chat.add_message("error", &format!("model: {}", e));
+            }
         }
     }
 }

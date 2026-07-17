@@ -57,30 +57,12 @@ pub fn resolve_client(
 
     let mut client = Client::new(&p.base_url, &m.name, &p.api_key, profile);
     client.set_debug(verbose);
-    let extra_headers = provider_headers(p);
-    if !extra_headers.is_empty() {
-        client.set_extra_headers(extra_headers);
-    }
     Ok((client, m.name.clone()))
 }
 
 pub fn is_open_router(p: &ProviderConfig) -> bool {
     let s = format!("{} {}", p.id.to_lowercase(), p.base_url.to_lowercase());
     s.contains("openrouter")
-}
-
-pub fn provider_headers(p: &ProviderConfig) -> HashMap<String, String> {
-    let mut h = HashMap::new();
-    if !p.referer.is_empty() {
-        h.insert("HTTP-Referer".to_string(), p.referer.clone());
-    }
-    if !p.app_title.is_empty() {
-        h.insert("X-OpenRouter-Title".to_string(), p.app_title.clone());
-    }
-    if !p.categories.is_empty() {
-        h.insert("X-OpenRouter-Categories".to_string(), p.categories.clone());
-    }
-    h
 }
 
 pub fn resolve_subagents(

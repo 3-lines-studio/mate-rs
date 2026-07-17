@@ -48,9 +48,11 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("Turn Tree", "tree"),
     ("Toggle Tool Results", "tools"),
     ("Toggle Thinking", "thinking"),
+    ("Switch Model", "model"),
     ("Compact", "compact"),
     ("Copy Last Response", "copy-last"),
     ("Export as Markdown", "export-md"),
+    ("Edit Config", "config"),
     ("Quit", "quit"),
 ];
 
@@ -93,7 +95,12 @@ impl<T: Clone> Default for Dropdown<T> {
     }
 }
 
-pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(String, String)>) {
+pub fn render_command_dropdown(
+    f: &mut Frame,
+    area: Rect,
+    dropdown: &Dropdown<(String, String)>,
+    query: &str,
+) {
     let items: Vec<ListItem> = dropdown
         .items
         .iter()
@@ -108,11 +115,17 @@ pub fn render_command_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(S
         })
         .collect();
 
+    let title = if query.is_empty() {
+        "Commands".to_string()
+    } else {
+        format!("Commands: {}", query)
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(COLORS.border))
-        .title("Commands");
+        .title(title.as_str());
     let inner = block.inner(area);
     f.render_widget(block, area);
     if dropdown.items.is_empty() {
@@ -178,6 +191,49 @@ pub fn render_template_dropdown(
         return;
     }
     f.render_widget(list, inner);
+}
+
+pub fn render_model_dropdown(
+    f: &mut Frame,
+    area: Rect,
+    dropdown: &Dropdown<(String, String)>,
+    current: &str,
+) {
+    let items: Vec<ListItem> = dropdown
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, (label, _))| {
+            let marker = if label == current { "● " } else { "  " };
+            let text = format!("{}{}", marker, label);
+            if i == dropdown.selected {
+                ListItem::new(text).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
+            } else {
+                ListItem::new(text).style(Style::default().fg(COLORS.muted))
+            }
+        })
+        .collect();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLORS.border))
+        .title("Switch Model");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if dropdown.items.is_empty() {
+        f.render_widget(
+            Paragraph::new(" No models configured")
+                .style(Style::default().fg(COLORS.placeholder))
+                .alignment(Alignment::Left),
+            inner,
+        );
+        return;
+    }
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(Some(dropdown.selected));
+    let list = List::new(items);
+    f.render_stateful_widget(list, inner, &mut state);
 }
 
 pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(String, String)>) {

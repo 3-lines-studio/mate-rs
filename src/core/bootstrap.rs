@@ -141,6 +141,8 @@ pub fn init(
     }
     deps.skills = Some(skill_store);
 
+    crate::tools::index::build_index_background(&deps.cwd);
+
     Ok(deps)
 }
 

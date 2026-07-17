@@ -33,10 +33,24 @@ pub fn thinking_indicator(
         spans.push(Span::styled(ch.to_string(), bold.fg(color)));
     }
     spans.push(Span::styled(
-        format!(" ({:.0?})", elapsed),
+        format!(" ({})", fmt_duration(elapsed)),
         Style::default().fg(COLORS.placeholder),
     ));
     Line::from(spans)
+}
+
+fn fmt_duration(d: std::time::Duration) -> String {
+    let total = d.as_secs();
+    let h = total / 3600;
+    let m = (total % 3600) / 60;
+    let s = total % 60;
+    if h > 0 {
+        format!("{}h{}m", h, m)
+    } else if m > 0 {
+        format!("{}m{}s", m, s)
+    } else {
+        format!("{}s", s)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

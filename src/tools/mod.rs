@@ -3,6 +3,7 @@ mod edit_file;
 pub mod gitignore;
 mod glob;
 mod grep;
+pub(crate) mod index;
 mod read_file;
 pub mod webfetch;
 mod write_file;
@@ -123,6 +124,7 @@ pub fn standard() -> Vec<Tool> {
         edit_file::tool(),
         grep::tool(),
         glob::tool(),
+        index::symbols_tool(),
     ]
 }
 
@@ -302,7 +304,7 @@ mod tests {
     #[test]
     fn test_standard() {
         let tools = standard();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         for n in &[
             "bash",
@@ -311,6 +313,7 @@ mod tests {
             "edit_file",
             "grep",
             "glob",
+            "symbols",
         ] {
             assert!(names.contains(n), "missing {}", n);
         }

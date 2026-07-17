@@ -6,14 +6,14 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
     text::{Line, Text},
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
 use std::time::{Duration, Instant};
 
 use super::chat_dropdowns::{
-    fuzzy_score, render_command_dropdown, render_file_dropdown, render_template_dropdown, Dropdown,
-    COMMANDS,
+    fuzzy_score, render_command_dropdown, render_file_dropdown, render_model_dropdown,
+    render_template_dropdown, Dropdown, COMMANDS,
 };
 use super::chat_handlers::{finish_bot_message, handle_agent_event, ChatMsg, LiveBlock, Segment};
 use super::chat_render::{render_tool_block, thinking_indicator};
@@ -26,6 +26,7 @@ pub enum Modal {
     Template,
     File,
     Command,
+    Model,
     Tree,
 }
 
@@ -65,6 +66,8 @@ pub struct ChatScreen {
 
     pub active_modal: Modal,
     pub command_dropdown: Dropdown<(String, String)>,
+    pub command_query: String,
+    pub model_dropdown: Dropdown<(String, String)>,
     pub template_dropdown: Dropdown<(Template, String)>,
     pub file_dropdown: Dropdown<(String, String)>,
     pub tree_dropdown: Dropdown<(String, String, usize, bool, Vec<bool>, bool)>,
@@ -131,6 +134,8 @@ impl ChatScreen {
 
             active_modal: Modal::None,
             command_dropdown: Dropdown::new(),
+            command_query: String::new(),
+            model_dropdown: Dropdown::new(),
             template_dropdown: Dropdown::new(),
             file_dropdown: Dropdown::new(),
             tree_dropdown: Dropdown::new(),
@@ -587,14 +592,14 @@ impl ChatScreen {
         if self.waiting || self.compacting {
             let mut h = 1u16;
             if self.active_modal == Modal::Command {
-                h += (COMMANDS.len() + 3) as u16;
+                h += (self.command_dropdown.items.len() + 3) as u16;
             }
             if self.active_modal == Modal::Tree {
                 h += 6;
             }
             return h;
         }
-        let mut h = self.textarea_height + 2;
+        let mut h = self.textarea_height + 4;
         if self.active_modal == Modal::Template {
             h += 8;
         }
@@ -602,7 +607,7 @@ impl ChatScreen {
             h += 11;
         }
         if self.active_modal == Modal::Command {
-            h += (COMMANDS.len() + 3) as u16;
+            h += (self.command_dropdown.items.len() + 3) as u16;
         }
         if self.active_modal == Modal::Tree {
             h += 6;
@@ -646,7 +651,7 @@ impl ChatScreen {
             y_offset += h;
         }
         if self.active_modal == Modal::Command {
-            let h = (COMMANDS.len() + 3) as u16;
+            let h = (self.command_dropdown.items.len() + 3) as u16;
             let top = bottom_area.y + y_offset;
             if let Some(h2) = fit_height(area, top, h) {
                 let modal_area = Rect::new(
@@ -655,7 +660,22 @@ impl ChatScreen {
                     bottom_area.width.saturating_sub(2),
                     h2,
                 );
-                render_command_dropdown(f, modal_area, &self.command_dropdown);
+                render_command_dropdown(f, modal_area, &self.command_dropdown, &self.command_query);
+            }
+            y_offset += h;
+        }
+
+        if self.active_modal == Modal::Model {
+            let h = (self.model_dropdown.items.len() + 3) as u16;
+            let top = bottom_area.y + y_offset;
+            if let Some(h2) = fit_height(area, top, h) {
+                let modal_area = Rect::new(
+                    bottom_area.x + 1,
+                    top,
+                    bottom_area.width.saturating_sub(2),
+                    h2,
+                );
+                render_model_dropdown(f, modal_area, &self.model_dropdown, &self.model_name);
             }
             y_offset += h;
         }
@@ -670,9 +690,9 @@ impl ChatScreen {
             let top = bottom_area.y + y_offset;
             if fit_height(area, top, 1).is_some() {
                 let thinking_area = Rect::new(
-                    bottom_area.x + 1,
+                    bottom_area.x + 2,
                     top,
-                    bottom_area.width.saturating_sub(2),
+                    bottom_area.width.saturating_sub(3),
                     1,
                 );
                 f.render_widget(
@@ -681,7 +701,7 @@ impl ChatScreen {
                 );
             }
         } else {
-            let prompt_h = self.textarea_height + 2;
+            let prompt_h = self.textarea_height + 4;
             let top = bottom_area.y + y_offset;
             let input = if self.textarea.is_empty() {
                 "Send a message…"
@@ -716,6 +736,7 @@ impl ChatScreen {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color))
+                .padding(Padding::new(1, 1, 1, 1))
                 .title_bottom(stats)
                 .title_bottom(info);
 
@@ -752,17 +773,51 @@ impl ChatScreen {
 
     pub fn open_command_dropdown(&mut self) {
         self.active_modal = Modal::Command;
-        self.command_dropdown.items = COMMANDS
-            .iter()
-            .map(|(l, a)| (l.to_string(), a.to_string()))
-            .collect();
+        self.command_query.clear();
         self.command_dropdown.selected = 0;
+        self.filter_command_dropdown();
+    }
+
+    pub fn filter_command_dropdown(&mut self) {
+        let q = self.command_query.as_str();
+        if q.is_empty() {
+            self.command_dropdown.items = COMMANDS
+                .iter()
+                .map(|(l, a)| (l.to_string(), a.to_string()))
+                .collect();
+        } else {
+            let mut scored: Vec<(i64, (String, String))> = COMMANDS
+                .iter()
+                .filter_map(|(l, a)| fuzzy_score(q, l).map(|s| (s, (l.to_string(), a.to_string()))))
+                .collect();
+            scored.sort_by_key(|b| std::cmp::Reverse(b.0));
+            self.command_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
+        }
+        if self.command_dropdown.selected >= self.command_dropdown.items.len() {
+            self.command_dropdown.selected = self.command_dropdown.items.len().saturating_sub(1);
+        }
         self.command_dropdown.visible = true;
+    }
+
+    pub fn open_model_dropdown(&mut self, models: &[crate::config::ModelConfig]) {
+        self.active_modal = Modal::Model;
+        self.model_dropdown.items = models
+            .iter()
+            .map(|m| (m.name.clone(), m.id.clone()))
+            .collect();
+        self.model_dropdown.selected = self
+            .model_dropdown
+            .items
+            .iter()
+            .position(|(n, _)| n == &self.model_name)
+            .unwrap_or(0);
+        self.model_dropdown.visible = true;
     }
 
     pub fn close_dropdowns(&mut self) {
         self.active_modal = Modal::None;
         self.command_dropdown.visible = false;
+        self.model_dropdown.visible = false;
         self.template_dropdown.visible = false;
         self.file_dropdown.visible = false;
         self.tree_dropdown.visible = false;
@@ -1047,7 +1102,7 @@ impl ChatScreen {
     }
 
     pub fn update_textarea_layout(&mut self) {
-        let cw = self.width.saturating_sub(4);
+        let cw = self.width.saturating_sub(6);
         let total = textarea_total_rows(&self.textarea, cw);
         let max_h = (self.height / 3).max(3);
         self.textarea_height = total.min(max_h).max(1);
@@ -1375,6 +1430,40 @@ mod tests {
     }
 
     #[test]
+    fn command_dropdown_filters_fuzzy() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.open_command_dropdown();
+        assert_eq!(s.command_dropdown.items.len(), COMMANDS.len());
+
+        s.command_query = "comp".to_string();
+        s.filter_command_dropdown();
+        let labels: Vec<&str> = s
+            .command_dropdown
+            .items
+            .iter()
+            .map(|(l, _)| l.as_str())
+            .collect();
+        assert_eq!(labels, vec!["Compact"]);
+
+        s.command_query = "toggle".to_string();
+        s.filter_command_dropdown();
+        let labels: Vec<String> = s
+            .command_dropdown
+            .items
+            .iter()
+            .map(|(l, _)| l.clone())
+            .collect();
+        assert_eq!(labels.len(), 2);
+        assert!(labels.contains(&"Toggle Tool Results".to_string()));
+        assert!(labels.contains(&"Toggle Thinking".to_string()));
+        assert_eq!(s.command_dropdown.selected, 0);
+
+        s.command_query = "zzz".to_string();
+        s.filter_command_dropdown();
+        assert!(s.command_dropdown.items.is_empty());
+    }
+
+    #[test]
     fn bottom_bar_never_overflows_buffer() {
         use std::panic;
         let mut panics: Vec<String> = Vec::new();
@@ -1391,6 +1480,8 @@ mod tests {
                 (true, Modal::Template),
                 (false, Modal::File),
                 (true, Modal::File),
+                (false, Modal::Model),
+                (true, Modal::Model),
                 (false, Modal::Tree),
             ] {
                 for &tall in &[false, true] {
@@ -1403,6 +1494,13 @@ mod tests {
                     s.active_modal = modal;
                     if modal == Modal::Command {
                         s.open_command_dropdown();
+                    }
+                    if modal == Modal::Model {
+                        s.model_dropdown.items = vec![
+                            ("gpt-4o".to_string(), "gpt-4o".to_string()),
+                            ("claude".to_string(), "claude-3.5-sonnet".to_string()),
+                        ];
+                        s.model_dropdown.selected = 0;
                     }
                     s.waiting = waiting;
                     if tall {
@@ -1422,6 +1520,7 @@ mod tests {
                                 Modal::Command => "Command",
                                 Modal::Template => "Template",
                                 Modal::File => "File",
+                                Modal::Model => "Model",
                                 Modal::Tree => "Tree",
                             },
                             tall

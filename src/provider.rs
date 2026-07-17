@@ -184,7 +184,6 @@ pub struct Client {
     api_key: String,
     http_client: reqwest::Client,
     debug: bool,
-    extra_headers: HashMap<String, String>,
     pub profile: ModelProfile,
 }
 
@@ -207,7 +206,6 @@ impl Client {
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
             debug: false,
-            extra_headers: HashMap::new(),
             profile,
         }
     }
@@ -216,8 +214,8 @@ impl Client {
         self.debug = enabled;
     }
 
-    pub fn set_extra_headers(&mut self, headers: HashMap<String, String>) {
-        self.extra_headers = headers;
+    pub fn debug_enabled(&self) -> bool {
+        self.debug
     }
 }
 
@@ -292,17 +290,13 @@ impl ChatClient for Client {
         }
 
         let url = format!("{}/chat/completions", self.base_url);
-        let mut http_req = self
+        let http_req = self
             .http_client
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("User-Agent", "mate/1.0")
             .body(body);
-
-        for (k, v) in &self.extra_headers {
-            http_req = http_req.header(k.as_str(), v.as_str());
-        }
 
         let resp = http_req.send().await.map_err(|e| ProviderError {
             status_code: 0,

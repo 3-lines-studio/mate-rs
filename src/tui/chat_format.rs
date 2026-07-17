@@ -20,6 +20,11 @@ pub fn tool_pretty_name(name: &str) -> &str {
 }
 
 pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
+    let raw = format_tool_label_raw(cwd, name, args);
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn format_tool_label_raw(cwd: &str, name: &str, args: &str) -> String {
     if args.is_empty() {
         return tool_pretty_name(name).to_string();
     }
@@ -250,5 +255,29 @@ mod tests {
             r#"{"path":"/home/user/project/src/main.rs","edits":[{},{}]}"#,
         );
         assert_eq!(label, "edit src/main.rs 2 edits");
+    }
+
+    #[test]
+    fn test_format_tool_label_bash_multiline_command() {
+        let label = format_tool_label("/home/user", "bash", r#"{"command":"echo foo\necho bar"}"#);
+        assert_eq!(label, "echo foo echo bar");
+        assert!(!label.contains('\n'));
+    }
+
+    #[test]
+    fn test_format_tool_label_delegate_multiline_task() {
+        let label = format_tool_label(
+            "/home/user",
+            "delegate",
+            r#"{"subagent":"coder","task":"do this\nand that"}"#,
+        );
+        assert_eq!(label, "coder: do this and that");
+        assert!(!label.contains('\n'));
+    }
+
+    #[test]
+    fn test_format_tool_label_fallback_collapses_newlines() {
+        let label = format_tool_label("/home/user", "custom", "{\"x\":\"a\nb\"}");
+        assert!(!label.contains('\n'));
     }
 }

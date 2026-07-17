@@ -16,7 +16,8 @@ use tokio::sync::Mutex as TokioMutex;
 const TOOL_RULES_PROMPT: &str = r"CRITICAL TOOL RULES:
 - Use tools directly — never describe what you'd do, execute it.
 - Do not fabricate results.
-- Non-delegate tool calls timeout after 120 seconds.";
+- Non-delegate tool calls timeout after 120 seconds.
+- Prefer `symbols` (kind: find/refs/list) over grep for symbol lookups in Rust, Go, TS/TSX/JSX, CSS.";
 
 // ── Event ────────────────────────────────────────────────────────────────
 
@@ -322,6 +323,10 @@ impl AgentSession {
 
     pub fn set_compaction_client(&mut self, client: Arc<dyn ChatClient>) {
         self.compaction_client = Some(client);
+    }
+
+    pub fn set_client(&mut self, client: Arc<dyn ChatClient>) {
+        self.client = client;
     }
 
     // ── prompt / retry ───────────────────────────────────────────────────

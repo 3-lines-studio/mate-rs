@@ -6,12 +6,6 @@ use std::path::PathBuf;
 pub struct ProviderConfig {
     pub id: String,
     pub base_url: String,
-    #[serde(default)]
-    pub referer: String,
-    #[serde(default)]
-    pub app_title: String,
-    #[serde(default)]
-    pub categories: String,
     #[serde(skip)]
     pub api_key: String,
 }
@@ -296,6 +290,25 @@ pub fn save_tui(
         "show_thinking",
         toml::Value::Boolean(show_thinking),
     );
+    write_config_map(dir, &data)
+}
+
+pub fn save_config(
+    dir: &str,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut data = load_config_map(dir)?;
+    let mut clean = config.clone();
+    clean.slack.bot_token = String::new();
+    clean.slack.app_token = String::new();
+    clean.telegram.bot_token = String::new();
+    let edited = toml::Value::try_from(&clean)?;
+    if let toml::Value::Table(mut t) = edited {
+        t.remove("services");
+        for (key, val) in t {
+            data.insert(key, val);
+        }
+    }
     write_config_map(dir, &data)
 }
 
@@ -717,26 +730,65 @@ api_key = "svc-key"
     }
 
     #[test]
-    fn test_load_from_openrouter_fields() {
+    fn test_save_config_secrets_not_leaked() {
         let dir = tempfile::TempDir::new().unwrap();
         let cfg_path = dir.path().join("config.toml");
         write_file(
             &cfg_path,
             r#"
-[[providers]]
-id = "openrouter"
-base_url = "https://openrouter.ai/api/v1"
-referer = "https://mysite.com"
-app_title = "My App"
-categories = "coding,chat"
+[agent]
+max_tool_rounds = 10
+
+[slack]
+bot_token = "xoxb-old"
+app_token = "xapp-old"
+
+[telegram]
+bot_token = "tele-old"
+allowed_users = [123]
 "#,
         );
 
-        let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
-        let p = &cfg.providers[0];
-        assert_eq!(p.id, "openrouter");
-        assert_eq!(p.referer, "https://mysite.com");
-        assert_eq!(p.app_title, "My App");
-        assert_eq!(p.categories, "coding,chat");
+        let mut cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+        cfg.slack.bot_token = "SECRET-xoxb".to_string();
+        cfg.slack.app_token = "SECRET-xapp".to_string();
+        cfg.telegram.bot_token = "SECRET-tele".to_string();
+
+        save_config(&dir.path().to_string_lossy(), &cfg).unwrap();
+
+        let written = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(!written.contains("SECRET"));
+        assert!(written.contains("allowed_users"));
+        assert!(written.contains("max_tool_rounds = 10"));
+    }
+
+    #[test]
+    fn test_save_config_empty_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let cfg = Config::default_for(&dir.path().to_string_lossy());
+        save_config(&dir.path().to_string_lossy(), &cfg).unwrap();
+
+        let cfg_path = dir.path().join("config.toml");
+        let data = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(data.contains("max_tool_rounds"));
+    }
+
+    #[test]
+    fn test_save_config_does_not_leak_service_secrets() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path();
+        write_file(&p.join("config.toml"), "[agent]\nmax_tool_rounds = 5\n");
+        write_file(
+            &p.join("secrets.toml"),
+            "[services.picsel]\nconnection_string = \"postgres://secret-db\"\napi_key = \"SVC-SECRET-KEY\"\n",
+        );
+
+        let cfg = load_from(&p.to_string_lossy()).unwrap();
+        save_config(&p.to_string_lossy(), &cfg).unwrap();
+
+        let written = std::fs::read_to_string(p.join("config.toml")).unwrap();
+        assert!(!written.contains("secret-db"));
+        assert!(!written.contains("SVC-SECRET-KEY"));
     }
 }
