@@ -54,20 +54,26 @@ fn execute_edit(p: EditParams) -> Result<String, String> {
     let data =
         std::fs::read_to_string(&p.path).map_err(|e| format!("read file {}: {}", p.path, e))?;
 
-    let mut content = data;
+    if p.edits.is_empty() {
+        crate::tools::write_file::atomic_write(&p.path, data.as_bytes())
+            .map_err(|e| format!("write file {}: {}", p.path, e))?;
+        return Ok(format!("Applied 0 edit(s) to {}", p.path));
+    }
+
+    let mut ranges: Vec<(usize, usize, usize)> = Vec::new();
     let mut applied = 0;
 
-    for edit in &p.edits {
-        let matches: Vec<_> = content.match_indices(&edit.old_text).collect();
+    for (idx, edit) in p.edits.iter().enumerate() {
+        let matches: Vec<_> = data.match_indices(&edit.old_text).collect();
         let count = matches.len();
         if count == 0 {
             let mut msg = format!("oldText not found in {}", p.path);
-            if let Some(hint) = find_similar_context(&content, &edit.old_text) {
+            if let Some(hint) = find_similar_context(&data, &edit.old_text) {
                 msg.push_str(&format!("\n\nDid you mean:\n```\n{}\n```", hint));
             }
             msg.push_str(&format!(
                 "\n\nFile preview:\n```\n{}\n```",
-                build_file_preview(&content, 20)
+                build_file_preview(&data, 20)
             ));
             return Err(msg);
         }
@@ -77,12 +83,12 @@ fn execute_edit(p: EditParams) -> Result<String, String> {
                 count, p.path
             );
             for (i, (pos, _)) in matches.iter().enumerate().take(2) {
-                let line_num = count_lines_before(&content, *pos);
+                let line_num = count_lines_before(&data, *pos);
                 msg.push_str(&format!(
                     "\n\nMatch {} (line {}):\n```\n{}\n```",
                     i + 1,
                     line_num,
-                    get_line_context(&content, line_num, 1)
+                    get_line_context(&data, line_num, 1)
                 ));
             }
             if count > 2 {
@@ -90,11 +96,32 @@ fn execute_edit(p: EditParams) -> Result<String, String> {
             }
             return Err(msg);
         }
-        content = content.replacen(&edit.old_text, &edit.new_text, 1);
+        let (start, _) = matches[0];
+        let end = start + edit.old_text.len();
+        ranges.push((start, end, idx));
         applied += 1;
     }
 
-    crate::tools::write_file::atomic_write(&p.path, content.as_bytes())
+    for i in 0..ranges.len() {
+        for j in (i + 1)..ranges.len() {
+            let (s1, e1, _) = ranges[i];
+            let (s2, e2, _) = ranges[j];
+            if s1 < e2 && s2 < e1 {
+                return Err(format!("edits overlap in {}", p.path));
+            }
+        }
+    }
+
+    ranges.sort_by_key(|r| std::cmp::Reverse(r.0));
+    let mut result = data;
+    for (start, end, idx) in &ranges {
+        let edit = &p.edits[*idx];
+        let left = &result[..*start];
+        let right = &result[*end..];
+        result = left.to_string() + &edit.new_text + right;
+    }
+
+    crate::tools::write_file::atomic_write(&p.path, result.as_bytes())
         .map_err(|e| format!("write file {}: {}", p.path, e))?;
 
     Ok(format!("Applied {} edit(s) to {}", applied, p.path))
@@ -378,6 +405,29 @@ mod tests {
         });
         let err = result.unwrap_err();
         assert!(err.contains("...and 3 more"));
+    }
+
+    #[test]
+    fn test_edit_file_overlapping_edits_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "abcdef").unwrap();
+
+        let result = execute_edit(EditParams {
+            path: path.to_string_lossy().to_string(),
+            edits: vec![
+                EditOp {
+                    old_text: "abcd".to_string(),
+                    new_text: "X".to_string(),
+                },
+                EditOp {
+                    old_text: "cdef".to_string(),
+                    new_text: "Y".to_string(),
+                },
+            ],
+        });
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("overlap"));
     }
 
     #[test]

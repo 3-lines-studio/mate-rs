@@ -111,7 +111,7 @@ async fn execute_bash(p: BashParams) -> Result<String, String> {
     if let Some(pid) = pid {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGTERM);
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
     }

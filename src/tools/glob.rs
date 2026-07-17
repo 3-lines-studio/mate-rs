@@ -1,5 +1,5 @@
 use crate::tools::define_tool;
-use crate::tools::gitignore::parse_gitignore;
+use crate::tools::gitignore::{parse_gitignore, should_skip_dir};
 use crate::tools::Tool;
 use regex::Regex;
 use serde::Deserialize;
@@ -104,13 +104,6 @@ fn walk_dir_glob(
             }
         }
     }
-}
-
-fn should_skip_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git" | "node_modules" | "vendor" | ".idea" | ".vscode" | "__pycache__" | ".pytest_cache"
-    )
 }
 
 fn glob_to_regex(pattern: &str) -> Result<Regex, String> {

@@ -84,8 +84,14 @@ pub fn turn_label(messages: &[Message]) -> String {
     for msg in messages {
         if msg.role == Role::User && !msg.content.is_empty() {
             let clean = msg.content.replace('\n', " ");
-            if clean.len() > 40 {
-                return format!("{}...", &clean[..37]);
+            if clean.chars().count() > 40 {
+                let cut = clean
+                    .char_indices()
+                    .take_while(|&(i, _)| i <= 37)
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                return format!("{}...", &clean[..cut]);
             }
             return clean;
         }
@@ -226,5 +232,35 @@ mod tests {
         }];
         let label = turn_label(&msgs);
         assert!(!label.contains('\n'));
+    }
+
+    fn user_msg(content: &str) -> Message {
+        Message {
+            role: Role::User,
+            content: content.to_string(),
+            reasoning_content: String::new(),
+            reasoning_details: vec![],
+            tool_calls: vec![],
+            tool_call_id: String::new(),
+            name: String::new(),
+            tool_duration: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_turn_label_multibyte_does_not_panic() {
+        let long_cjk = "日本語のテキスト".repeat(10);
+        let msgs = vec![user_msg(&long_cjk)];
+        let label = turn_label(&msgs);
+        assert!(label.ends_with("..."));
+        assert!(label.chars().count() <= 40);
+        let _ = std::str::from_utf8(label.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn test_turn_label_emoji_does_not_panic() {
+        let msgs = vec![user_msg(&"🦀".repeat(50))];
+        let label = turn_label(&msgs);
+        assert!(label.ends_with("..."));
     }
 }

@@ -109,8 +109,14 @@ pub fn format_tool_label(cwd: &str, name: &str, args: &str) -> String {
                 if !subagent.is_empty() {
                     let mut label = subagent.to_string();
                     if !task.is_empty() {
-                        let t = if task.len() > 80 {
-                            format!("{}…", &task[..80])
+                        let t = if task.chars().count() > 80 {
+                            let cut = task
+                                .char_indices()
+                                .take_while(|&(i, _)| i <= 80)
+                                .last()
+                                .map(|(i, _)| i)
+                                .unwrap_or(0);
+                            format!("{}…", &task[..cut])
                         } else {
                             task.to_string()
                         };

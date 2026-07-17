@@ -74,7 +74,7 @@ fn read_file_lines(p: &ReadFileParams) -> Result<(String, i32), String> {
             continue;
         }
         if p.limit > 0 && line_num > end {
-            continue;
+            break;
         }
         out.extend_from_slice(&buf);
     }

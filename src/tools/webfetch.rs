@@ -204,6 +204,8 @@ fn is_text_content(content_type: &str) -> bool {
 
 async fn fetch_http(url: &str, max_size: i32) -> Result<String, String> {
     let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(120))
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() >= 10 {
                 return attempt.error("too many redirects");

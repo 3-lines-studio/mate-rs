@@ -306,7 +306,7 @@ impl ChatScreen {
         let msg_area = Rect::new(
             area.x + 2,
             area.y,
-            area.width.saturating_sub(3),
+            area.width.saturating_sub(4),
             area.height.saturating_sub(bottom_h),
         );
         self.render_messages_area(f, msg_area);
@@ -371,7 +371,7 @@ impl ChatScreen {
     fn render_message_ansi(&self, msg: &ChatMsg) -> String {
         match msg.role.as_str() {
             "user" => {
-                let full_w = (self.width as usize).saturating_sub(3);
+                let full_w = (self.width as usize).saturating_sub(4);
                 let (r, g, b) =
                     crate::render::block::hex_to_rgb(crate::render::theme::VESPER.surface);
                 let bg = format!("\x1b[48;2;{r};{g};{b}m");
@@ -390,7 +390,7 @@ impl ChatScreen {
             }
             "assistant" => self.render_assistant_turn(msg),
             "error" => {
-                let full_w = (self.width as usize).saturating_sub(3);
+                let full_w = (self.width as usize).saturating_sub(4);
                 let (r, g, b) = crate::render::block::hex_to_rgb("#3a1d1d");
                 let bg = format!("\x1b[48;2;{r};{g};{b}m");
                 let red = "\x1b[38;2;247;118;142m";
@@ -441,7 +441,7 @@ impl ChatScreen {
                 "prose" => self.renderer.render(&seg.content),
                 "tool" => {
                     let collapsed = !self.tools_expanded;
-                    let width = (self.width as usize).saturating_sub(3);
+                    let width = (self.width as usize).saturating_sub(4);
                     let mut out = render_tool_block(
                         &seg.tool_name,
                         &seg.tool_args,
@@ -517,7 +517,7 @@ impl ChatScreen {
                 }
                 "tool" => {
                     let collapsed = !self.tools_expanded;
-                    let width = (self.width as usize).saturating_sub(3);
+                    let width = (self.width as usize).saturating_sub(4);
                     let mut out = render_tool_block(
                         &lb.tool_name,
                         &lb.tool_args,

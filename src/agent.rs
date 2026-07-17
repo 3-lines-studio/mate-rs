@@ -14,9 +14,9 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 
 const TOOL_RULES_PROMPT: &str = r"CRITICAL TOOL RULES:
-- You have tools available. Use them directly. Never describe what you would do — execute it.
-- Do not fabricate results. If you need information, use the tools.
-- Tool calls have a 120-second timeout.";
+- Use tools directly — never describe what you'd do, execute it.
+- Do not fabricate results.
+- Non-delegate tool calls timeout after 120 seconds.";
 
 // ── Event ────────────────────────────────────────────────────────────────
 
@@ -1402,7 +1402,7 @@ fn build_delegate_def(names: &[String], descriptions: &HashMap<String, String>) 
         def_type: "function".into(),
         function: crate::message::ToolDefFunction {
             name: "delegate".into(),
-            description: "Delegate a task to a subagent with its own model, tools, and system prompt. The subagent runs to completion and returns its result. Use for complex coding tasks or research that would benefit from a specialized model.".into(),
+            description: "Delegate a task to a subagent with its own model and tools. The subagent runs to completion and returns its result. Use for complex coding tasks or research that would benefit from a specialized model.".into(),
             parameters: params,
         },
     }
@@ -1452,15 +1452,15 @@ async fn call_compaction(client: &Arc<dyn ChatClient>, prompt: &str) -> Result<S
 
 fn build_summarization_prompt(turns: &[Turn]) -> String {
     let mut sb = String::new();
-    sb.push_str("You are writing a minimal handoff document for a coding session. Another agent will continue the work using only this document. Extract only what's needed to continue — discard exploration, dead ends, and intermediate reasoning.\n\n");
-    sb.push_str("Format:\n\n## Goal\nThe objective in 1-2 sentences.\n\n## Done\nWhat was accomplished. One bullet per change, with file path and what changed.\n\n## State\nCurrent state: what works, what's broken, any errors or blockers.\n\n## Next\nImmediate next steps or open questions.\n\nOmit sections with nothing to report. Be minimal — every word must earn its place.\n\n---\n\n");
+    sb.push_str("You are writing a minimal handoff document. Another agent will continue the work using only this document. Extract only what's needed to continue — discard exploration, dead ends, and intermediate reasoning.\n\n");
+    sb.push_str("Format:\n\n## Goal\nThe objective in 1-2 sentences.\n\n## Done\nWhat was accomplished. One bullet per change, with file path and what changed.\n\n## State\nCurrent state: what works, what's broken, any errors or blockers.\n\n## Next\nImmediate next steps or open questions.\n\nOmit empty sections.\n\n---\n\n");
     format_turns_for_summary(&mut sb, turns);
     sb
 }
 
 fn build_incremental_summary_prompt(prev_summary: &str, new_turns: &[Turn]) -> String {
     let mut sb = String::new();
-    sb.push_str("Update this session handoff with the new turns below. Same format and rules: minimal, only what's needed to continue. Move completed items to \"Done\", update \"State\", and revise \"Next\". Omit sections with nothing to report.\n\n");
+    sb.push_str("Update this session handoff with the new turns below. Same format and rules: minimal, only what's needed to continue. Move completed items to \"Done\", update \"State\", and revise \"Next\".\n\n");
     sb.push_str("Current handoff:\n\n");
     sb.push_str(prev_summary);
     sb.push_str("\n\n---\n\nNew turns:\n\n");

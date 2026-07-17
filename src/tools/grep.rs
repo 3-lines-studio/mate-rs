@@ -1,5 +1,5 @@
 use crate::tools::define_tool;
-use crate::tools::gitignore::parse_gitignore;
+use crate::tools::gitignore::{parse_gitignore, should_skip_dir};
 use crate::tools::Tool;
 use regex::Regex;
 use serde::Deserialize;
@@ -81,67 +81,20 @@ fn execute_grep(mut p: GrepParams) -> Result<String, String> {
     let ig = parse_gitignore(&p.path);
 
     let mut results: Vec<String> = Vec::new();
-    let entries = collect_files(path, &ig);
+    let max = p.max_results as usize;
 
-    for entry in &entries {
-        if results.len() >= p.max_results as usize {
-            break;
-        }
-
-        let rel = entry
-            .strip_prefix(path)
-            .unwrap_or(entry)
-            .to_string_lossy()
-            .to_string();
-
-        if ig.is_ignored(&rel, false) {
-            continue;
-        }
-
-        if !p.glob.is_empty() {
-            let fname = entry.file_name().unwrap_or_default().to_string_lossy();
-            if !glob_filename_match(&p.glob, &fname) {
-                continue;
-            }
-        }
-
-        if is_binary_file(entry) {
-            continue;
-        }
-
-        let remaining = p.max_results - results.len() as i32;
-        if remaining <= 0 {
-            break;
-        }
-
-        let matches = grep_file(entry, &matcher, remaining);
-        match matches {
-            Ok(m) => {
-                if !m.is_empty() {
-                    results.push(m);
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(results.join("\n"))
-}
-
-fn collect_files(
-    root: &Path,
-    ig: &crate::tools::gitignore::GitignoreMatcher,
-) -> Vec<std::path::PathBuf> {
-    let mut files = Vec::new();
     fn walk(
         dir: &Path,
         root: &Path,
         ig: &crate::tools::gitignore::GitignoreMatcher,
-        files: &mut Vec<std::path::PathBuf>,
-    ) {
+        matcher: &dyn Fn(&str) -> bool,
+        glob: &str,
+        max_results: usize,
+        results: &mut Vec<String>,
+    ) -> bool {
         let read_dir = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
-            Err(_) => return,
+            Err(_) => return false,
         };
         for entry in read_dir.flatten() {
             let path = entry.path();
@@ -158,17 +111,42 @@ fn collect_files(
                 if ig.is_ignored(&rel, true) {
                     continue;
                 }
-                walk(&path, root, ig, files);
+                if walk(&path, root, ig, matcher, glob, max_results, results) {
+                    return true;
+                }
             } else {
                 if ig.is_ignored(&rel, false) {
                     continue;
                 }
-                files.push(path);
+                if !glob.is_empty() {
+                    let fname = entry.file_name().to_string_lossy().to_string();
+                    if !glob_filename_match(glob, &fname) {
+                        continue;
+                    }
+                }
+                if is_binary_file(&path) {
+                    continue;
+                }
+                let remaining = max_results - results.len();
+                if remaining == 0 {
+                    return true;
+                }
+                if let Ok(m) = grep_file(&path, matcher, remaining as i32) {
+                    if !m.is_empty() {
+                        results.push(m);
+                    }
+                }
+                if results.len() >= max_results {
+                    return true;
+                }
             }
         }
+        false
     }
-    walk(root, root, ig, &mut files);
-    files
+
+    walk(path, path, &ig, &*matcher, &p.glob, max, &mut results);
+
+    Ok(results.join("\n"))
 }
 
 #[allow(clippy::type_complexity)]
@@ -236,13 +214,6 @@ fn is_binary_file(path: &Path) -> bool {
     let mut buf = [0u8; 8192];
     let n = f.read(&mut buf).unwrap_or(0);
     buf[..n].contains(&0)
-}
-
-fn should_skip_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git" | "node_modules" | "vendor" | ".idea" | ".vscode" | "__pycache__" | ".pytest_cache"
-    )
 }
 
 fn glob_filename_match(pattern: &str, name: &str) -> bool {
@@ -476,6 +447,24 @@ mod tests {
         assert!(!result.contains("ignored_dir"));
         assert!(!result.contains("debug.log"));
         assert!(result.contains("main.go"));
+    }
+
+    #[test]
+    fn test_grep_max_results_stops_early() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for i in 0..50 {
+            std::fs::write(dir.path().join(format!("f{}.txt", i)), "match").unwrap();
+        }
+
+        let result = execute_grep(GrepParams {
+            pattern: "match".to_string(),
+            path: dir.path().to_string_lossy().to_string(),
+            glob: String::new(),
+            max_results: 3,
+            regex: false,
+        })
+        .unwrap();
+        assert_eq!(result.lines().count(), 3);
     }
 
     #[test]

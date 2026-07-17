@@ -202,7 +202,10 @@ impl Client {
             base_url: base_url.trim_end_matches('/').to_string(),
             model: model.to_string(),
             api_key: api_key.to_string(),
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             debug: false,
             extra_headers: HashMap::new(),
             profile,
@@ -689,8 +692,11 @@ async fn read_stream(resp: reqwest::Response, tx: mpsc::Sender<StreamEvent>, deb
         }
     }
 
-    // Emit accumulated tool calls
-    for tc in tool_calls.values() {
+    // Emit accumulated tool calls (in index order for deterministic output)
+    let mut tc_keys: Vec<&i32> = tool_calls.keys().collect();
+    tc_keys.sort();
+    for k in tc_keys {
+        let tc = &tool_calls[k];
         if !tc.name.is_empty() {
             if debug {
                 eprintln!(
@@ -1450,6 +1456,78 @@ mod tests {
             }
         }
         assert!(got_tool_call);
+    }
+
+    #[tokio::test]
+    async fn test_sse_tool_call_emitted_after_done_terminator() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"cmd\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\":\\\"ls\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+                ),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let c = Client::new(
+            &mock_server.uri(),
+            "m",
+            "k",
+            ModelProfile {
+                context_window: 8000,
+                max_output_tokens: 4096,
+                thinking_type: String::new(),
+                reasoning_effort: String::new(),
+                reasoning_max_tokens: 0,
+                open_router: false,
+                input_price: 0.0,
+                cached_input_price: 0.0,
+                output_price: 0.0,
+                fallback_models: vec![],
+                route: String::new(),
+                provider_prefs: None,
+                prompt_cache: false,
+                prompt_cache_ttl: String::new(),
+            },
+        );
+
+        let req = ChatRequest {
+            model: String::new(),
+            messages: vec![],
+            tools: vec![],
+            stream: false,
+            max_tokens: 0,
+            stream_options: None,
+            thinking: None,
+            reasoning_effort: String::new(),
+            reasoning: None,
+            models: vec![],
+            route: String::new(),
+            provider_prefs: None,
+            cache_control: None,
+            session_id: String::new(),
+        };
+
+        let mut rx = c.chat(req).await.unwrap();
+
+        let mut got_tool_call = false;
+        while let Some(ev) = rx.recv().await {
+            if ev.event_type == "tool_call"
+                && ev
+                    .tool_call
+                    .as_ref()
+                    .is_some_and(|tc| tc.name == "bash" && tc.arguments == "{\"cmd\":\"ls\"}")
+            {
+                got_tool_call = true;
+            }
+        }
+        assert!(
+            got_tool_call,
+            "tool_call event dropped when stream ends with [DONE]"
+        );
     }
 
     #[tokio::test]

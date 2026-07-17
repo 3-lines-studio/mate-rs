@@ -8,6 +8,7 @@ struct GitignoreRule {
     pattern: String,
     negate: bool,
     dir_only: bool,
+    anchored: bool,
     dir: String,
 }
 
@@ -24,7 +25,7 @@ struct CacheEntry {
 static CACHE: once_cell::sync::Lazy<RwLock<HashMap<String, CacheEntry>>> =
     once_cell::sync::Lazy::new(|| RwLock::new(HashMap::new()));
 
-fn should_skip_dir(name: &str) -> bool {
+pub(crate) fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
         ".git" | "node_modules" | "vendor" | ".idea" | ".vscode" | "__pycache__" | ".pytest_cache"
@@ -151,10 +152,17 @@ fn parse_gitignore_file(path: &str, dir: &str) -> Vec<GitignoreRule> {
             line.pop();
         }
 
+        let mut anchored = false;
+        if let Some(stripped) = line.strip_prefix('/') {
+            anchored = true;
+            line = stripped.to_string();
+        }
+
         rules.push(GitignoreRule {
             pattern: line,
             negate,
             dir_only,
+            anchored,
             dir: dir.to_string(),
         });
     }
@@ -176,7 +184,16 @@ impl GitignoreMatcher {
                 continue;
             }
 
-            let target = if !rule.pattern.contains('/') {
+            let target = if rule.anchored {
+                if rule.dir.is_empty() {
+                    rel_path.to_string()
+                } else {
+                    rel_path
+                        .strip_prefix(&format!("{}/", rule.dir))
+                        .unwrap_or(rel_path)
+                        .to_string()
+                }
+            } else if !rule.pattern.contains('/') {
                 Path::new(rel_path)
                     .file_name()
                     .map(|s| s.to_string_lossy().to_string())
@@ -199,32 +216,97 @@ impl GitignoreMatcher {
 }
 
 fn glob_match(pattern: &str, name: &str) -> bool {
-    fn matches(p: &[u8], n: &[u8]) -> bool {
-        let (mut pi, mut ni) = (0, 0);
-        let (mut star_p, mut star_n) = (None::<usize>, 0usize);
+    #[derive(Debug, Clone, Copy)]
+    enum Tok {
+        DoubleStar,
+        DoubleStarSlash,
+        Star,
+        Question,
+        Lit(u8),
+    }
 
-        while ni < n.len() || pi < p.len() {
-            if pi < p.len() && p[pi] == b'*' {
-                star_p = Some(pi);
-                star_n = ni;
-                pi += 1;
-            } else if pi < p.len() && ni < n.len() && (p[pi] == b'?' || p[pi] == n[ni]) {
-                pi += 1;
-                ni += 1;
-            } else if let Some(sp) = star_p {
-                if star_n >= n.len() {
-                    return false;
-                }
-                pi = sp + 1;
-                star_n += 1;
-                ni = star_n;
+    let p = pattern.as_bytes();
+    let n = name.as_bytes();
+
+    let mut tokens: Vec<Tok> = Vec::new();
+    let mut i = 0;
+    while i < p.len() {
+        if p[i] == b'*' && i + 1 < p.len() && p[i + 1] == b'*' {
+            if i + 2 < p.len() && p[i + 2] == b'/' {
+                tokens.push(Tok::DoubleStarSlash);
+                i += 3;
             } else {
-                return false;
+                tokens.push(Tok::DoubleStar);
+                i += 2;
+            }
+        } else if p[i] == b'*' {
+            tokens.push(Tok::Star);
+            i += 1;
+        } else if p[i] == b'?' {
+            tokens.push(Tok::Question);
+            i += 1;
+        } else {
+            tokens.push(Tok::Lit(p[i]));
+            i += 1;
+        }
+    }
+
+    fn matches(tokens: &[Tok], ti: usize, n: &[u8], ni: usize) -> bool {
+        if ti == tokens.len() {
+            return ni == n.len();
+        }
+        match tokens[ti] {
+            Tok::DoubleStarSlash => {
+                if matches(tokens, ti + 1, n, ni) {
+                    return true;
+                }
+                let mut nj = ni;
+                while nj < n.len() && n[nj] != b'/' {
+                    nj += 1;
+                }
+                if nj < n.len() && matches(tokens, ti, n, nj + 1) {
+                    return true;
+                }
+                false
+            }
+            Tok::DoubleStar => {
+                if matches(tokens, ti + 1, n, ni) {
+                    return true;
+                }
+                if ni < n.len() && matches(tokens, ti, n, ni + 1) {
+                    return true;
+                }
+                false
+            }
+            Tok::Star => {
+                if ni < n.len() && n[ni] != b'/' {
+                    if matches(tokens, ti, n, ni + 1) {
+                        return true;
+                    }
+                    if matches(tokens, ti + 1, n, ni + 1) {
+                        return true;
+                    }
+                }
+                false
+            }
+            Tok::Question => {
+                if ni < n.len() && n[ni] != b'/' {
+                    matches(tokens, ti + 1, n, ni + 1)
+                } else {
+                    false
+                }
+            }
+            Tok::Lit(c) => {
+                if ni < n.len() && n[ni] == c {
+                    matches(tokens, ti + 1, n, ni + 1)
+                } else {
+                    false
+                }
             }
         }
-        true
     }
-    matches(pattern.as_bytes(), name.as_bytes())
+
+    matches(&tokens, 0, n, 0)
 }
 
 #[cfg(test)]
@@ -273,9 +355,41 @@ mod tests {
     }
 
     #[test]
+    fn test_gitignore_leading_slash_anchored() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "/target\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("target")).unwrap();
+        std::fs::create_dir_all(dir.path().join("sub").join("target")).unwrap();
+
+        let matcher = parse_gitignore(&dir.path().to_string_lossy());
+
+        assert!(matcher.is_ignored("target", true));
+        assert!(!matcher.is_ignored("sub/target", true));
+    }
+
+    #[test]
     fn test_gitignore_no_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let matcher = parse_gitignore(&dir.path().to_string_lossy());
         assert!(!matcher.is_ignored("anything.go", false));
+    }
+
+    #[test]
+    fn test_glob_star_does_not_cross_slash() {
+        assert!(glob_match("a/*.tmp", "a/x.tmp"));
+        assert!(!glob_match("a/*.tmp", "a/sub/x.tmp"));
+    }
+
+    #[test]
+    fn test_glob_doublestar_spans() {
+        assert!(glob_match("a/**/*.tmp", "a/x.tmp"));
+        assert!(glob_match("a/**/*.tmp", "a/b/c/x.tmp"));
+        assert!(!glob_match("a/**/*.tmp", "a/x.go"));
+    }
+
+    #[test]
+    fn test_glob_doublestar_leading() {
+        assert!(glob_match("**/foo", "foo"));
+        assert!(glob_match("**/foo", "a/b/foo"));
     }
 }

@@ -305,10 +305,16 @@ fn random_hash() -> String {
 
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
+        return s.to_string();
     }
+    let cut = max_len.saturating_sub(3);
+    let boundary = s
+        .char_indices()
+        .take_while(|&(i, _)| i <= cut)
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    format!("{}...", &s[..boundary])
 }
 
 fn expand_tilde(path: &str) -> String {
@@ -497,6 +503,19 @@ mod tests {
         for s in &sessions {
             assert_ne!(s.id, "not-a-session.txt");
         }
+    }
+
+    #[test]
+    fn test_truncate_multibyte_safe() {
+        let s = "日本語のテスト".to_string();
+        let out = truncate(&s, 5);
+        assert!(out.ends_with("..."));
+        let _ = std::str::from_utf8(out.as_bytes()).unwrap();
+
+        let emoji = "\u{1f980}".repeat(10);
+        let out2 = truncate(&emoji, 4);
+        assert!(out2.ends_with("..."));
+        let _ = std::str::from_utf8(out2.as_bytes()).unwrap();
     }
 
     #[test]
