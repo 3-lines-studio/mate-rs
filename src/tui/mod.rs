@@ -306,8 +306,7 @@ impl App {
                                 if let Some(item) = self.chat.template_dropdown.selected_item() {
                                     let name = item.template.name.clone();
                                     self.chat.close_dropdowns();
-                                    let val = format!("/{} ", name);
-                                    self.chat.set_text(&val);
+                                    self.chat.complete_prefix('/', &format!("/{} ", name));
                                 }
                             }
                             (false, false, KeyCode::Enter)
@@ -316,8 +315,7 @@ impl App {
                                 if let Some(item) = self.chat.file_dropdown.selected_item() {
                                     let path = item.label.clone();
                                     self.chat.close_dropdowns();
-                                    let val = format!("{} ", path);
-                                    self.chat.set_text(&val);
+                                    self.chat.complete_prefix('@', &format!("@{} ", path));
                                 }
                             }
                             (false, false, KeyCode::Enter)
@@ -372,8 +370,7 @@ impl App {
                                 if let Some(item) = self.chat.template_dropdown.selected_item() {
                                     let name = item.template.name.clone();
                                     self.chat.close_dropdowns();
-                                    let val = format!("/{} ", name);
-                                    self.chat.set_text(&val);
+                                    self.chat.complete_prefix('/', &format!("/{} ", name));
                                 }
                             }
                             (false, false, KeyCode::Tab)
@@ -382,8 +379,7 @@ impl App {
                                 if let Some(item) = self.chat.file_dropdown.selected_item() {
                                     let path = item.label.clone();
                                     self.chat.close_dropdowns();
-                                    let val = format!("{} ", path);
-                                    self.chat.set_text(&val);
+                                    self.chat.complete_prefix('@', &format!("@{} ", path));
                                 }
                             }
                             (true, false, KeyCode::Left) => self.chat.cursor_left_word(),

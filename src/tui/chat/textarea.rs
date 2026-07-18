@@ -88,6 +88,14 @@ impl ChatScreen {
         self.cursor = self.textarea.len();
     }
 
+    pub fn complete_prefix(&mut self, prefix: char, value: &str) {
+        let Some(start) = self.textarea[..self.cursor].rfind(prefix) else {
+            return;
+        };
+        self.textarea.replace_range(start..self.cursor, value);
+        self.cursor = start + value.len();
+    }
+
     pub fn cursor_up(&mut self) -> bool {
         let (line, col) = self.locate();
         if line == 0 {
@@ -490,5 +498,43 @@ mod tests {
         assert_eq!(s.cursor, 6);
         s.cursor_left_word();
         assert_eq!(s.cursor, 0);
+    }
+
+    #[test]
+    fn complete_prefix_template_replaces_only_query() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("review /cr");
+        s.cursor_end();
+        s.complete_prefix('/', "/code_review ");
+        assert_eq!(s.textarea, "review /code_review ");
+        assert_eq!(s.cursor, s.textarea.len());
+    }
+
+    #[test]
+    fn complete_prefix_file_keeps_at_and_surrounding_text() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("see @sr");
+        s.cursor_end();
+        s.complete_prefix('@', "@src/main.rs ");
+        assert_eq!(s.textarea, "see @src/main.rs ");
+        assert_eq!(s.cursor, s.textarea.len());
+    }
+
+    #[test]
+    fn complete_prefix_uses_last_trigger_before_cursor() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("/a and /b");
+        s.cursor_end();
+        s.complete_prefix('/', "/beta ");
+        assert_eq!(s.textarea, "/a and /beta ");
+    }
+
+    #[test]
+    fn complete_prefix_noop_without_trigger() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        s.set_text("no trigger here");
+        s.cursor_end();
+        s.complete_prefix('/', "/x ");
+        assert_eq!(s.textarea, "no trigger here");
     }
 }

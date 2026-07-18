@@ -2,8 +2,9 @@ use crate::tools::define_tool;
 use crate::tools::gitignore::{parse_gitignore, walk_files};
 use crate::tools::Tool;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tree_sitter::StreamingIterator;
 
@@ -43,8 +44,18 @@ struct IndexData {
 }
 
 const SUPPORTED_EXTS: &[&str] = &["rs", "go", "ts", "tsx", "jsx", "css"];
-const INDEX_DIR: &str = ".mate";
-const INDEX_FILE: &str = ".mate/index.json";
+fn project_hash(root: &str) -> String {
+    let canon = std::fs::canonicalize(root).unwrap_or_else(|_| PathBuf::from(root));
+    let mut hasher = Sha256::new();
+    hasher.update(canon.to_string_lossy().as_bytes());
+    hex::encode(&hasher.finalize()[..8])
+}
+
+fn index_store_dir(root: &str) -> PathBuf {
+    PathBuf::from(crate::config::dir())
+        .join("index")
+        .join(project_hash(root))
+}
 
 const RUST_QUERY: &str = r#"
 (function_item name: (identifier) @definition.function)
@@ -176,7 +187,7 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
     let ig = parse_gitignore(&p.path);
 
     let mut to_process: Vec<String> = Vec::new();
-    walk_files(root, &ig, &[INDEX_DIR], &mut |_full_path, rel| {
+    walk_files(root, &ig, &[], &mut |_full_path, rel| {
         if let Some(ext) = extract_extension(rel) {
             if SUPPORTED_EXTS.contains(&ext) {
                 to_process.push(rel.to_string());
@@ -235,7 +246,7 @@ fn execute_symbols(mut p: SymbolsParams) -> Result<String, String> {
         p.max_results = 100;
     }
 
-    let index_path = Path::new(&p.path).join(INDEX_FILE);
+    let index_path = index_store_dir(&p.path).join("index.json");
     if !index_path.exists() {
         execute_index_build(IndexBuildParams {
             path: p.path.clone(),
@@ -294,7 +305,7 @@ fn execute_symbols(mut p: SymbolsParams) -> Result<String, String> {
 }
 
 fn load_index(root: &str) -> IndexData {
-    let path = Path::new(root).join(INDEX_FILE);
+    let path = index_store_dir(root).join("index.json");
     match std::fs::read_to_string(&path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
             log::warn!("index parse failed, rebuilding {}: {}", path.display(), e);
@@ -313,7 +324,7 @@ fn load_index(root: &str) -> IndexData {
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn save_index(root: &str, index: &IndexData) -> Result<(), String> {
-    let dir = Path::new(root).join(INDEX_DIR);
+    let dir = index_store_dir(root);
     std::fs::create_dir_all(&dir).map_err(|e| format!("index: {}", e))?;
     let json = serde_json::to_string(index).map_err(|e| format!("index: {}", e))?;
     let final_path = dir.join("index.json");
@@ -507,7 +518,9 @@ mod tests {
     use super::*;
 
     fn setup_dir() -> tempfile::TempDir {
-        tempfile::TempDir::new().unwrap()
+        let dir = tempfile::TempDir::new().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", dir.path().join("xdg"));
+        dir
     }
 
     #[test]
@@ -804,7 +817,7 @@ const OtherComp = () => <span />;
         .unwrap();
         assert!(result.contains("hello"));
 
-        assert!(dir.path().join(".mate/index.json").exists());
+        assert!(index_store_dir(&root).join("index.json").exists());
     }
 
     #[test]
