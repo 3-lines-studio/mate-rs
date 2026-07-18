@@ -36,6 +36,10 @@ ratatui = "0.30"
 crossterm = "0.29"
 syntect = { version = "5", features = ["default-syntaxes"] }
 unicode-width = "0.2"
+pulldown-cmark = "0.12"
+anstyle = "1"
+textwrap = { version = "0.16", features = ["unicode-linebreak", "unicode-width"] }
+url = "2"
 arboard = "3"
 headless_chrome = "1"
 tree-sitter = "0.26"
@@ -45,4 +49,5 @@ tree-sitter-typescript = "0.23"
 tree-sitter-css = "0.25"
 
 [dev-dependencies]
+similar-asserts = "1"
 wiremock = "0.6"

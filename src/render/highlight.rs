@@ -9,7 +9,7 @@ use syntect::util::LinesWithEndings;
 
 use once_cell::sync::Lazy;
 
-static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
+pub(crate) static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
 
 fn sc(hex: &str) -> SyntectColor {
     let (r, g, b) = hex_to_rgb(hex);
@@ -108,7 +108,7 @@ fn build_vesper_theme() -> Theme {
     }
 }
 
-static VESPER_THEME: Lazy<Theme> = Lazy::new(build_vesper_theme);
+pub(crate) static VESPER_THEME: Lazy<Theme> = Lazy::new(build_vesper_theme);
 
 fn syntect_style_to_ansi(s: Style) -> String {
     let mut codes: Vec<String> = Vec::new();

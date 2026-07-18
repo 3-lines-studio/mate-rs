@@ -396,7 +396,7 @@ impl ChatScreen {
             }
             return h;
         }
-        let mut h = self.textarea_height + 4;
+        let mut h = self.textarea_height + 3;
         if self.active_modal == super::Modal::Template {
             h += 8;
         }
@@ -566,7 +566,7 @@ impl ChatScreen {
                 );
             }
         } else {
-            let prompt_h = self.textarea_height + 4;
+            let prompt_h = self.textarea_height + 3;
             let top = bottom_area.y + y_offset;
             let input = if self.textarea.is_empty() {
                 "Send a message…"
@@ -601,7 +601,7 @@ impl ChatScreen {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color))
-                .padding(Padding::new(1, 1, 1, 1))
+                .padding(Padding::new(1, 1, 0, 1))
                 .title_bottom(stats)
                 .title_bottom(info);
 

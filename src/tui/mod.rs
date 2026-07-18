@@ -330,11 +330,15 @@ impl App {
                             (true, false, KeyCode::Char('p')) => {
                                 self.chat.open_command_dropdown();
                             }
-                            (false, false, KeyCode::Char('/')) => {
+                            (false, false, KeyCode::Char('/'))
+                                if self.chat.active_modal == Modal::None =>
+                            {
                                 self.chat.insert_char('/');
                                 self.chat.open_template_dropdown("");
                             }
-                            (false, false, KeyCode::Char('@')) => {
+                            (false, false, KeyCode::Char('@'))
+                                if self.chat.active_modal == Modal::None =>
+                            {
                                 self.chat.insert_char('@');
                                 self.chat.ensure_files_loaded();
                                 self.chat.open_file_dropdown("");
@@ -725,5 +729,66 @@ impl App {
                 self.chat.add_message("error", &format!("model: {}", e));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::provider::{Client, ModelProfile};
+    use crate::session::store::Store;
+    use crate::tools::Registry;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn key(code: KeyCode) -> CrosstermEvent {
+        CrosstermEvent::Key(crossterm::event::KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn app_in_chat() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let deps = Deps {
+            agent_name: String::new(),
+            client: Client::new("http://localhost", "m", "k", ModelProfile::default()),
+            compaction_client: None,
+            registry: Arc::new(Registry::standard()),
+            system_prompt: String::new(),
+            max_rounds: 0,
+            cwd: path.clone(),
+            store: Store::new(&path).unwrap(),
+            subagents: HashMap::new(),
+            skills: None,
+            config: Config::default_for(&path),
+            config_dir: String::new(),
+            model_name: String::new(),
+            templates: vec![],
+        };
+        let mut app = App::new(deps);
+        app.state = AppState::Chat;
+        (app, dir)
+    }
+
+    #[test]
+    fn slash_in_file_modal_stays_in_file_modal() {
+        let (mut app, _dir) = app_in_chat();
+        app.handle_input(key(KeyCode::Char('@')));
+        assert!(matches!(app.chat.active_modal, Modal::File));
+
+        app.handle_input(key(KeyCode::Char('/')));
+        assert!(matches!(app.chat.active_modal, Modal::File));
+        assert_eq!(app.chat.textarea, "@/");
+    }
+
+    #[test]
+    fn at_in_template_modal_stays_in_template_modal() {
+        let (mut app, _dir) = app_in_chat();
+        app.handle_input(key(KeyCode::Char('/')));
+        assert!(matches!(app.chat.active_modal, Modal::Template));
+
+        app.handle_input(key(KeyCode::Char('@')));
+        assert!(matches!(app.chat.active_modal, Modal::Template));
+        assert_eq!(app.chat.textarea, "/@");
     }
 }
