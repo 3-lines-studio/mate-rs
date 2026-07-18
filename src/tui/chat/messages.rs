@@ -9,9 +9,7 @@ use ratatui::{
     Frame,
 };
 
-use super::super::chat_dropdowns::{
-    render_command_dropdown, render_file_dropdown, render_model_dropdown, render_template_dropdown,
-};
+use super::super::chat_dropdowns::render_dropdown;
 use super::super::chat_handlers::{ChatMsg, Segment};
 use super::super::chat_render::{render_tool_block, thinking_indicator};
 use super::super::theme::COLORS;
@@ -431,7 +429,26 @@ impl ChatScreen {
                     bottom_area.width.saturating_sub(2),
                     h2,
                 );
-                render_template_dropdown(f, modal_area, &self.template_dropdown, "");
+                render_dropdown(
+                    f,
+                    modal_area,
+                    &self.template_dropdown,
+                    "Templates",
+                    " No matches",
+                    |item, _| {
+                        let name = format!("/{}", item.template.name);
+                        let desc = if item.template.description.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  {}", item.template.description)
+                        };
+                        Line::styled(
+                            format!(" {}{}", name, desc),
+                            Style::default().fg(COLORS.muted),
+                        )
+                    },
+                    false,
+                );
             }
             y_offset += h;
         }
@@ -445,7 +462,20 @@ impl ChatScreen {
                     bottom_area.width.saturating_sub(2),
                     h2,
                 );
-                render_file_dropdown(f, modal_area, &self.file_dropdown);
+                render_dropdown(
+                    f,
+                    modal_area,
+                    &self.file_dropdown,
+                    "Files",
+                    " No matches",
+                    |item, _| {
+                        Line::styled(
+                            format!(" {}", item.label),
+                            Style::default().fg(COLORS.muted),
+                        )
+                    },
+                    false,
+                );
             }
             y_offset += h;
         }
@@ -459,7 +489,25 @@ impl ChatScreen {
                     bottom_area.width.saturating_sub(2),
                     h2,
                 );
-                render_command_dropdown(f, modal_area, &self.command_dropdown, &self.command_query);
+                let title = if self.command_query.is_empty() {
+                    "Commands".to_string()
+                } else {
+                    format!("Commands: {}", self.command_query)
+                };
+                render_dropdown(
+                    f,
+                    modal_area,
+                    &self.command_dropdown,
+                    &title,
+                    " No matches",
+                    |item, _| {
+                        Line::styled(
+                            format!(" {}", item.label),
+                            Style::default().fg(COLORS.muted),
+                        )
+                    },
+                    false,
+                );
             }
             y_offset += h;
         }
@@ -474,7 +522,25 @@ impl ChatScreen {
                     bottom_area.width.saturating_sub(2),
                     h2,
                 );
-                render_model_dropdown(f, modal_area, &self.model_dropdown, &self.model_name);
+                render_dropdown(
+                    f,
+                    modal_area,
+                    &self.model_dropdown,
+                    "Switch Model",
+                    " No models configured",
+                    |item, _| {
+                        let marker = if item.label == self.model_name {
+                            "● "
+                        } else {
+                            "  "
+                        };
+                        Line::styled(
+                            format!("{}{}", marker, item.label),
+                            Style::default().fg(COLORS.muted),
+                        )
+                    },
+                    true,
+                );
             }
             y_offset += h;
         }

@@ -104,10 +104,16 @@ async fn execute_bash(p: BashParams) -> Result<String, String> {
 
     #[cfg(unix)]
     if let Some(pid) = pid {
-        unsafe {
-            libc::kill(-(pid as i32), libc::SIGTERM);
+        if child.try_wait().map_or(true, |s| s.is_none()) {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGTERM);
+            }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            libc::kill(-(pid as i32), libc::SIGKILL);
+            if child.try_wait().map_or(true, |s| s.is_none()) {
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+            }
         }
     }
     let _ = std::fs::remove_file(&script_path);

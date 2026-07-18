@@ -41,90 +41,66 @@ pub enum EventKind {
 }
 
 impl Event {
-    pub fn text_delta(delta: &str) -> Self {
+    pub fn new(kind: EventKind) -> Self {
         Event {
-            kind: EventKind::TextDelta(delta.into()),
+            kind,
             subagent: String::new(),
             subagent_id: String::new(),
         }
+    }
+
+    pub fn from_subagent(kind: EventKind, subagent: String, subagent_id: String) -> Self {
+        Event {
+            kind,
+            subagent,
+            subagent_id,
+        }
+    }
+
+    pub fn text_delta(delta: &str) -> Self {
+        Event::new(EventKind::TextDelta(delta.into()))
     }
     pub fn reasoning_delta(delta: &str) -> Self {
-        Event {
-            kind: EventKind::ReasoningDelta(delta.into()),
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::ReasoningDelta(delta.into()))
     }
     pub fn tool_call_start(tc: &StreamToolCall) -> Self {
-        Event {
-            kind: EventKind::ToolCallStart {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                args: tc.arguments.clone(),
-            },
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::ToolCallStart {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            args: tc.arguments.clone(),
+        })
     }
     pub fn tool_result_ev(tc: &StreamToolCall, result: &str, duration: &str) -> Self {
-        Event {
-            kind: EventKind::ToolResult {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                args: tc.arguments.clone(),
-                result: result.into(),
-                duration: duration.into(),
-            },
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::ToolResult {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            args: tc.arguments.clone(),
+            result: result.into(),
+            duration: duration.into(),
+        })
     }
     pub fn tool_error_ev(tc: &StreamToolCall, msg: &str, duration: &str) -> Self {
-        Event {
-            kind: EventKind::ToolError {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                error: msg.into(),
-                duration: duration.into(),
-            },
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::ToolError {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            error: msg.into(),
+            duration: duration.into(),
+        })
     }
     pub fn error_msg(msg: &str) -> Self {
-        Event {
-            kind: EventKind::Error(msg.into()),
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::Error(msg.into()))
     }
     pub fn retry_ev(msg: &str) -> Self {
-        Event {
-            kind: EventKind::Retry(msg.into()),
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::Retry(msg.into()))
     }
     pub fn retry_available(msg: &str) -> Self {
-        Event {
-            kind: EventKind::RetryAvailable(msg.into()),
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::RetryAvailable(msg.into()))
     }
     pub fn agent_done(finish_reason: &str) -> Self {
-        Event {
-            kind: EventKind::AgentDone(finish_reason.into()),
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::AgentDone(finish_reason.into()))
     }
     pub fn usage_ev(usage: Usage) -> Self {
-        Event {
-            kind: EventKind::Usage(usage),
-            subagent: String::new(),
-            subagent_id: String::new(),
-        }
+        Event::new(EventKind::Usage(usage))
     }
 }
 

@@ -1,6 +1,5 @@
-use crate::tools::Tool;
+use crate::tools::{define_tool, Tool};
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -73,66 +72,44 @@ impl Store {
     }
 
     pub fn list_tool(&self) -> Tool {
-        let self_list = self.list();
-        Tool {
-            name: "list_skills".to_string(),
-            description: "List available skills with their descriptions and associated tools. Use this to discover domain-specific documentation before loading one with load_skill.".to_string(),
-            parameters: {
-                let mut params = HashMap::new();
-                params.insert("type".to_string(), serde_json::json!("object"));
-                params.insert("properties".to_string(), serde_json::json!({}));
-                params.insert("required".to_string(), serde_json::json!([]));
-                params
+        let skills_list = self.list();
+        let params = crate::tools::object_schema(&[], &[]);
+        define_tool(
+            "list_skills",
+            "List available skills with their descriptions and associated tools. Use this to discover domain-specific documentation before loading one with load_skill.",
+            params,
+            move |_: ListSkillsParams| {
+                let skills_list = skills_list.clone();
+                async move { Ok(skills_list) }
             },
-            execute: std::sync::Arc::new({
-                let sl = self_list;
-                move |_| {
-                    let sl = sl.clone();
-                    Box::pin(async move { Ok(sl) })
-                }
-            }),
-        }
+        )
     }
 
     pub fn load_tool(&self) -> Tool {
-        let self_list = self.list();
-        let self_skills: Vec<Skill> = self.skills.clone();
-        Tool {
-            name: "load_skill".to_string(),
-            description: "Load the full content of a skill by name. Use list_skills first to see available skills and their descriptions.".to_string(),
-            parameters: {
-                let mut params = HashMap::new();
-                params.insert("type".to_string(), serde_json::json!("object"));
-                let mut props = HashMap::new();
-                props.insert("name".to_string(), serde_json::json!({
-                    "type": "string",
-                    "description": "Name of the skill to load (as shown by list_skills)"
-                }));
-                params.insert("properties".to_string(), serde_json::json!(props));
-                params.insert("required".to_string(), serde_json::json!(["name"]));
-                params
-            },
-            execute: std::sync::Arc::new({
-                let _sl = self_list;
-                move |raw: serde_json::Value| {
-                    let skills = self_skills.clone();
-                    Box::pin(async move {
-                        #[derive(Deserialize)]
-                        struct P {
-                            name: String,
+        let skills = self.skills.clone();
+        let params = crate::tools::object_schema(
+            &[(
+                "name",
+                serde_json::json!({"type": "string", "description": "Name of the skill to load (as shown by list_skills)"}),
+            )],
+            &["name"],
+        );
+        define_tool(
+            "load_skill",
+            "Load the full content of a skill by name. Use list_skills first to see available skills and their descriptions.",
+            params,
+            move |p: LoadSkillParams| {
+                let skills = skills.clone();
+                async move {
+                    for sk in &skills {
+                        if sk.name == p.name {
+                            return Ok(sk.content.clone());
                         }
-                        let p: P = serde_json::from_value(raw)
-                            .map_err(|e| format!("invalid parameters: {}", e))?;
-                        for sk in &skills {
-                            if sk.name == p.name {
-                                return Ok(sk.content.clone());
-                            }
-                        }
-                        Err(format!("skill {:?} not found", p.name))
-                    })
+                    }
+                    Err(format!("skill {:?} not found", p.name))
                 }
-            }),
-        }
+            },
+        )
     }
 }
 
@@ -199,6 +176,14 @@ fn parse_skill_file(raw: &str, source: &str) -> Skill {
 
     skill.content = rest.trim().to_string();
     skill
+}
+
+#[derive(Debug, Deserialize)]
+struct ListSkillsParams {}
+
+#[derive(Debug, Deserialize)]
+struct LoadSkillParams {
+    name: String,
 }
 
 #[derive(Debug, Default, Deserialize)]

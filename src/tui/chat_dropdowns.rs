@@ -3,7 +3,8 @@ use crate::tui::theme::COLORS;
 use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
-    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
+    text::Line,
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -57,6 +58,28 @@ pub const COMMANDS: &[(&str, &str)] = &[
 ];
 
 #[derive(Clone)]
+pub struct LabeledItem {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Clone)]
+pub struct TemplateItem {
+    pub template: Template,
+    pub search_key: String,
+}
+
+#[derive(Clone)]
+pub struct TreeItem {
+    pub turn_id: String,
+    pub label: String,
+    pub depth: usize,
+    pub is_last: bool,
+    pub ancestors: Vec<bool>,
+    pub is_current: bool,
+}
+
+#[derive(Clone)]
 pub struct Dropdown<T: Clone> {
     pub items: Vec<T>,
     pub selected: usize,
@@ -95,228 +118,53 @@ impl<T: Clone> Default for Dropdown<T> {
     }
 }
 
-pub fn render_command_dropdown(
+pub fn render_dropdown<T: Clone>(
     f: &mut Frame,
     area: Rect,
-    dropdown: &Dropdown<(String, String)>,
-    query: &str,
+    dropdown: &Dropdown<T>,
+    title: &str,
+    empty_text: &str,
+    fmt: impl Fn(&T, bool) -> Line<'_>,
+    use_state: bool,
 ) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLORS.border))
+        .title(title);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if dropdown.items.is_empty() && !empty_text.is_empty() {
+        f.render_widget(
+            Paragraph::new(empty_text)
+                .style(Style::default().fg(COLORS.placeholder))
+                .alignment(Alignment::Left),
+            inner,
+        );
+        return;
+    }
+
     let items: Vec<ListItem> = dropdown
         .items
         .iter()
         .enumerate()
-        .map(|(i, (label, _))| {
-            if i == dropdown.selected {
-                ListItem::new(format!(" {}", label))
-                    .style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
+        .map(|(i, item)| {
+            let is_sel = i == dropdown.selected;
+            let line = fmt(item, is_sel);
+            if is_sel {
+                ListItem::new(line).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
             } else {
-                ListItem::new(format!(" {}", label)).style(Style::default().fg(COLORS.muted))
+                ListItem::new(line)
             }
         })
         .collect();
 
-    let title = if query.is_empty() {
-        "Commands".to_string()
+    if use_state {
+        let mut state = ListState::default();
+        state.select(Some(dropdown.selected));
+        f.render_stateful_widget(List::new(items), inner, &mut state);
     } else {
-        format!("Commands: {}", query)
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLORS.border))
-        .title(title.as_str());
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if dropdown.items.is_empty() {
-        f.render_widget(
-            Paragraph::new(" No matches")
-                .style(Style::default().fg(COLORS.placeholder))
-                .alignment(Alignment::Left),
-            inner,
-        );
-        return;
+        f.render_widget(List::new(items), inner);
     }
-    let list = List::new(items);
-    f.render_widget(list, inner);
-}
-
-pub fn render_template_dropdown(
-    f: &mut Frame,
-    area: Rect,
-    dropdown: &Dropdown<(Template, String)>,
-    query: &str,
-) {
-    let items: Vec<ListItem> = dropdown
-        .items
-        .iter()
-        .enumerate()
-        .map(|(i, (t, _))| {
-            let name = format!("/{}", t.name);
-            let desc = if t.description.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", t.description)
-            };
-            let text = format!(" {}{}", name, desc);
-            if i == dropdown.selected {
-                ListItem::new(text).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
-            } else {
-                ListItem::new(text).style(Style::default().fg(COLORS.muted))
-            }
-        })
-        .collect();
-
-    let title = if query.is_empty() {
-        "Templates".to_string()
-    } else {
-        format!("Templates: /{}", query)
-    };
-
-    let list = List::new(items);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLORS.border))
-        .title(title.as_str());
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if dropdown.items.is_empty() {
-        f.render_widget(
-            Paragraph::new(" No matches")
-                .style(Style::default().fg(COLORS.placeholder))
-                .alignment(Alignment::Left),
-            inner,
-        );
-        return;
-    }
-    f.render_widget(list, inner);
-}
-
-pub fn render_model_dropdown(
-    f: &mut Frame,
-    area: Rect,
-    dropdown: &Dropdown<(String, String)>,
-    current: &str,
-) {
-    let items: Vec<ListItem> = dropdown
-        .items
-        .iter()
-        .enumerate()
-        .map(|(i, (label, _))| {
-            let marker = if label == current { "● " } else { "  " };
-            let text = format!("{}{}", marker, label);
-            if i == dropdown.selected {
-                ListItem::new(text).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
-            } else {
-                ListItem::new(text).style(Style::default().fg(COLORS.muted))
-            }
-        })
-        .collect();
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLORS.border))
-        .title("Switch Model");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if dropdown.items.is_empty() {
-        f.render_widget(
-            Paragraph::new(" No models configured")
-                .style(Style::default().fg(COLORS.placeholder))
-                .alignment(Alignment::Left),
-            inner,
-        );
-        return;
-    }
-    let mut state = ratatui::widgets::ListState::default();
-    state.select(Some(dropdown.selected));
-    let list = List::new(items);
-    f.render_stateful_widget(list, inner, &mut state);
-}
-
-pub fn render_file_dropdown(f: &mut Frame, area: Rect, dropdown: &Dropdown<(String, String)>) {
-    let items: Vec<ListItem> = dropdown
-        .items
-        .iter()
-        .enumerate()
-        .map(|(i, (path, _))| {
-            if i == dropdown.selected {
-                ListItem::new(format!(" {}", path))
-                    .style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
-            } else {
-                ListItem::new(format!(" {}", path)).style(Style::default().fg(COLORS.muted))
-            }
-        })
-        .collect();
-
-    let list = List::new(items);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLORS.border))
-        .title("Files");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if dropdown.items.is_empty() {
-        f.render_widget(
-            Paragraph::new(" No matches")
-                .style(Style::default().fg(COLORS.placeholder))
-                .alignment(Alignment::Left),
-            inner,
-        );
-        return;
-    }
-    f.render_widget(list, inner);
-}
-
-#[allow(clippy::type_complexity)]
-pub fn render_tree_dropdown(
-    f: &mut Frame,
-    area: Rect,
-    dropdown: &Dropdown<(String, String, usize, bool, Vec<bool>, bool)>,
-) {
-    // items: (turn_id, label, depth, is_last, ancestors, is_current)
-    let items: Vec<ListItem> = dropdown
-        .items
-        .iter()
-        .enumerate()
-        .map(|(i, (_, label, depth, is_last, ancestors, is_current))| {
-            let mut prefix = String::new();
-            for d in 0..*depth {
-                if d < ancestors.len() && ancestors[d] {
-                    prefix.push_str("│  ");
-                } else {
-                    prefix.push_str("   ");
-                }
-            }
-            if *depth > 0 {
-                if *is_last {
-                    prefix.push_str("└─ ");
-                } else {
-                    prefix.push_str("├─ ");
-                }
-            }
-            let marker = if *is_current { "● " } else { "  " };
-            let text = format!("{}{}{}", prefix, marker, label);
-
-            if i == dropdown.selected {
-                ListItem::new(text).style(Style::default().bg(COLORS.selected).fg(COLORS.accent))
-            } else if *is_current {
-                ListItem::new(text).style(Style::default().fg(COLORS.accent))
-            } else {
-                ListItem::new(text).style(Style::default().fg(COLORS.muted))
-            }
-        })
-        .collect();
-
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(COLORS.border))
-            .title("Turn Tree"),
-    );
-    f.render_widget(list, area);
 }

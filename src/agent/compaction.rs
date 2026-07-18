@@ -15,103 +15,76 @@ impl super::AgentSession {
             || self.sess.context_tokens
                 > ctx_window * super::COMPACTION_THRESHOLD_NUM / super::COMPACTION_THRESHOLD_DEN;
         let keep_turns = compute_keep_turns(turns, ctx_window);
+        let force_keep = if force { 0 } else { keep_turns };
 
         if force && turns.len() <= 1 {
             return flatten_turns(turns);
         }
 
-        let force_keep = if force { 0 } else { keep_turns };
+        let has_summary = !self.compaction.compacted_summary.is_empty();
+        let new_turns = if has_summary {
+            turns_after_id(turns, &self.compaction.compacted_up_to)
+        } else {
+            turns
+        };
 
-        if self.compaction.compacted_summary.is_empty() {
-            if !above_threshold {
+        let (old_turns, recent_turns, is_incremental) = if !has_summary || new_turns.is_empty() {
+            if !has_summary && (!above_threshold || turns.len() <= force_keep) {
                 return flatten_turns(turns);
             }
-            if turns.len() <= force_keep {
-                return flatten_turns(turns);
-            }
-
-            let split = turns.len() - force_keep;
-            let old = &turns[..split];
-            let recent = &turns[split..];
-
-            return match call_compaction(compaction_client, &build_summarization_prompt(old)).await
-            {
-                Ok(summary) => {
-                    self.compaction.compacted_summary = summary.clone();
-                    self.compaction.compacted_up_to = old[old.len() - 1].id.clone();
-                    build_compacted_messages(&summary, &flatten_turns(recent))
-                }
-                Err(e) => {
-                    log::warn!("compaction failed, using full ancestry error={}", e);
-                    flatten_turns(turns)
-                }
-            };
-        }
-
-        let new_turns = turns_after_id(turns, &self.compaction.compacted_up_to);
-        if new_turns.is_empty() {
-            if turns.len() <= force_keep {
+            if has_summary && turns.len() <= force_keep {
                 return build_compacted_messages(
                     &self.compaction.compacted_summary,
                     &flatten_turns(turns),
                 );
             }
             let split = turns.len() - force_keep;
-            let old = &turns[..split];
-            let recent = &turns[split..];
-            return match call_compaction(compaction_client, &build_summarization_prompt(old)).await
-            {
-                Ok(summary) => {
-                    self.compaction.compacted_summary = summary.clone();
-                    self.compaction.compacted_up_to = old[old.len() - 1].id.clone();
-                    build_compacted_messages(&summary, &flatten_turns(recent))
-                }
-                Err(e) => {
-                    log::warn!("compaction failed, reusing stale summary error={}", e);
-                    build_compacted_messages(
-                        &self.compaction.compacted_summary,
-                        &flatten_turns(turns),
-                    )
-                }
-            };
-        }
+            (&turns[..split], &turns[split..], false)
+        } else {
+            if !above_threshold {
+                return build_compacted_messages(
+                    &self.compaction.compacted_summary,
+                    &flatten_turns(new_turns),
+                );
+            }
+            let keep_new = compute_keep_turns(new_turns, ctx_window);
+            if new_turns.len() <= keep_new {
+                return build_compacted_messages(
+                    &self.compaction.compacted_summary,
+                    &flatten_turns(new_turns),
+                );
+            }
+            let split = new_turns.len() - keep_new;
+            (&new_turns[..split], &new_turns[split..], true)
+        };
 
-        if !above_threshold {
-            return build_compacted_messages(
-                &self.compaction.compacted_summary,
-                &flatten_turns(new_turns),
-            );
-        }
+        let prompt = if is_incremental {
+            build_incremental_summary_prompt(&self.compaction.compacted_summary, old_turns)
+        } else {
+            build_summarization_prompt(old_turns)
+        };
 
-        let keep_new = compute_keep_turns(new_turns, ctx_window);
-        if new_turns.len() <= keep_new {
-            return build_compacted_messages(
-                &self.compaction.compacted_summary,
-                &flatten_turns(new_turns),
-            );
-        }
-
-        let split = new_turns.len() - keep_new;
-        let summary_turns = &new_turns[..split];
-        let recent_turns = &new_turns[split..];
-
-        match call_compaction(
-            compaction_client,
-            &build_incremental_summary_prompt(&self.compaction.compacted_summary, summary_turns),
-        )
-        .await
-        {
+        match call_compaction(compaction_client, &prompt).await {
             Ok(summary) => {
                 self.compaction.compacted_summary = summary.clone();
-                self.compaction.compacted_up_to = summary_turns[summary_turns.len() - 1].id.clone();
+                self.compaction.compacted_up_to = old_turns[old_turns.len() - 1].id.clone();
                 build_compacted_messages(&summary, &flatten_turns(recent_turns))
             }
             Err(e) => {
-                log::warn!("compaction failed, reusing stale summary error={}", e);
-                build_compacted_messages(
-                    &self.compaction.compacted_summary,
-                    &flatten_turns(new_turns),
-                )
+                if has_summary {
+                    log::warn!("compaction failed, reusing stale summary error={}", e);
+                    build_compacted_messages(
+                        &self.compaction.compacted_summary,
+                        &flatten_turns(if new_turns.is_empty() {
+                            turns
+                        } else {
+                            new_turns
+                        }),
+                    )
+                } else {
+                    log::warn!("compaction failed, using full ancestry error={}", e);
+                    flatten_turns(turns)
+                }
             }
         }
     }
@@ -148,20 +121,6 @@ fn turns_after_id<'a>(turns: &'a [Turn], id: &str) -> &'a [Turn] {
         }
     }
     &[]
-}
-
-fn truncate_for_summary(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        return s.into();
-    }
-    let cut = max_len.saturating_sub(3);
-    let boundary = s
-        .char_indices()
-        .take_while(|&(i, _)| i <= cut)
-        .map(|(i, _)| i)
-        .last()
-        .unwrap_or(0);
-    format!("{}...", &s[..boundary])
 }
 
 fn compute_keep_turns(turns: &[Turn], context_window: i32) -> usize {
@@ -277,47 +236,15 @@ fn format_turns_for_summary(sb: &mut String, turns: &[Turn]) {
                     sb.push_str("Tool result (");
                     sb.push_str(&msg.name);
                     sb.push_str("): ");
-                    sb.push_str(&truncate_for_summary(&msg.content, 2000));
+                    sb.push_str(&crate::util::truncate_with_ellipsis(
+                        &msg.content,
+                        2000,
+                        "...",
+                    ));
                     sb.push('\n');
                 }
                 Role::System => {}
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_truncate_for_summary_short() {
-        assert_eq!(truncate_for_summary("hello", 10), "hello");
-    }
-
-    #[test]
-    fn test_truncate_for_summary_exact() {
-        assert_eq!(truncate_for_summary("hello", 5), "hello");
-    }
-
-    #[test]
-    fn test_truncate_for_summary_truncation() {
-        let result = truncate_for_summary("hello world this is long", 10);
-        assert!(result.ends_with("..."));
-        assert!(result.len() <= 10);
-    }
-
-    #[test]
-    fn test_truncate_for_summary_multibyte_no_panic() {
-        let result = truncate_for_summary("héllo wörld", 8);
-        assert!(result.ends_with("..."));
-        assert!(result.len() <= 8);
-    }
-
-    #[test]
-    fn test_truncate_for_summary_small_maxlen() {
-        let result = truncate_for_summary("abcdef", 4);
-        assert!(result.ends_with("..."));
-        assert!(result.len() <= 4);
     }
 }

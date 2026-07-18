@@ -1,6 +1,6 @@
 use super::ChatScreen;
 
-use super::super::chat_dropdowns::{fuzzy_score, COMMANDS};
+use super::super::chat_dropdowns::{fuzzy_score, LabeledItem, TemplateItem, TreeItem, COMMANDS};
 
 impl ChatScreen {
     pub fn open_command_dropdown(&mut self) {
@@ -15,12 +15,25 @@ impl ChatScreen {
         if q.is_empty() {
             self.command_dropdown.items = COMMANDS
                 .iter()
-                .map(|(l, a)| (l.to_string(), a.to_string()))
+                .map(|(l, a)| LabeledItem {
+                    label: l.to_string(),
+                    value: a.to_string(),
+                })
                 .collect();
         } else {
-            let mut scored: Vec<(i64, (String, String))> = COMMANDS
+            let mut scored: Vec<(i64, LabeledItem)> = COMMANDS
                 .iter()
-                .filter_map(|(l, a)| fuzzy_score(q, l).map(|s| (s, (l.to_string(), a.to_string()))))
+                .filter_map(|(l, a)| {
+                    fuzzy_score(q, l).map(|s| {
+                        (
+                            s,
+                            LabeledItem {
+                                label: l.to_string(),
+                                value: a.to_string(),
+                            },
+                        )
+                    })
+                })
                 .collect();
             scored.sort_by_key(|b| std::cmp::Reverse(b.0));
             self.command_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
@@ -35,13 +48,16 @@ impl ChatScreen {
         self.active_modal = super::Modal::Model;
         self.model_dropdown.items = models
             .iter()
-            .map(|m| (m.name.clone(), m.id.clone()))
+            .map(|m| LabeledItem {
+                label: m.name.clone(),
+                value: m.id.clone(),
+            })
             .collect();
         self.model_dropdown.selected = self
             .model_dropdown
             .items
             .iter()
-            .position(|(n, _)| n == &self.model_name)
+            .position(|n| n.label == self.model_name)
             .unwrap_or(0);
         self.model_dropdown.visible = true;
     }
@@ -65,10 +81,10 @@ impl ChatScreen {
         if q.is_empty() {
             self.template_dropdown.items = self.all_template_items.clone();
         } else {
-            let mut scored: Vec<(i64, (crate::prompts::Template, String))> = self
+            let mut scored: Vec<(i64, TemplateItem)> = self
                 .all_template_items
                 .iter()
-                .filter_map(|t| fuzzy_score(q, &t.0.name).map(|s| (s, t.clone())))
+                .filter_map(|t| fuzzy_score(q, &t.template.name).map(|s| (s, t.clone())))
                 .collect();
             scored.sort_by_key(|b| std::cmp::Reverse(b.0));
             self.template_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
@@ -89,11 +105,27 @@ impl ChatScreen {
         let q = query.rsplit_once('@').map(|(_, a)| a).unwrap_or(query);
         let all = self.all_files.clone();
         if q.is_empty() {
-            self.file_dropdown.items = all.into_iter().map(|f| (f.clone(), f)).collect();
-        } else {
-            let mut scored: Vec<(i64, (String, String))> = all
+            self.file_dropdown.items = all
                 .into_iter()
-                .filter_map(|f| fuzzy_score(q, &f).map(|s| (s, (f.clone(), f))))
+                .map(|f| LabeledItem {
+                    label: f.clone(),
+                    value: f,
+                })
+                .collect();
+        } else {
+            let mut scored: Vec<(i64, LabeledItem)> = all
+                .into_iter()
+                .filter_map(|f| {
+                    fuzzy_score(q, &f).map(|s| {
+                        (
+                            s,
+                            LabeledItem {
+                                label: f.clone(),
+                                value: f,
+                            },
+                        )
+                    })
+                })
                 .collect();
             scored.sort_by_key(|b| std::cmp::Reverse(b.0));
             self.file_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
@@ -122,9 +154,9 @@ impl ChatScreen {
 
         let roots: Vec<String> = children.get("").cloned().unwrap_or_default();
 
-        let mut items: Vec<(String, String, usize, bool, Vec<bool>, bool)> = Vec::new();
+        let mut items: Vec<TreeItem> = Vec::new();
 
-        #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+        #[allow(clippy::too_many_arguments)]
         fn walk(
             turn_id: &str,
             depth: usize,
@@ -133,21 +165,21 @@ impl ChatScreen {
             by_id: &std::collections::HashMap<String, &crate::session::types::TurnMeta>,
             children: &std::collections::HashMap<String, Vec<String>>,
             current_turn: &str,
-            items: &mut Vec<(String, String, usize, bool, Vec<bool>, bool)>,
+            items: &mut Vec<TreeItem>,
         ) {
             let label = by_id
                 .get(turn_id)
                 .map(|m| m.label.clone())
                 .unwrap_or_else(|| turn_id.to_string());
             let is_current = turn_id == current_turn;
-            items.push((
-                turn_id.to_string(),
+            items.push(TreeItem {
+                turn_id: turn_id.to_string(),
                 label,
                 depth,
                 is_last,
-                ancestors.clone(),
+                ancestors: ancestors.clone(),
                 is_current,
-            ));
+            });
 
             if let Some(kids) = children.get(turn_id) {
                 for (i, child_id) in kids.iter().enumerate() {
@@ -193,7 +225,7 @@ impl ChatScreen {
         let items = self.tree_items.clone();
         let mut selected = 0usize;
         for (i, item) in items.iter().enumerate() {
-            if item.5 {
+            if item.is_current {
                 selected = i;
                 break;
             }
@@ -221,7 +253,7 @@ mod tests {
             .command_dropdown
             .items
             .iter()
-            .map(|(l, _)| l.as_str())
+            .map(|item| item.label.as_str())
             .collect();
         assert_eq!(labels, vec!["Compact"]);
 
@@ -231,7 +263,7 @@ mod tests {
             .command_dropdown
             .items
             .iter()
-            .map(|(l, _)| l.clone())
+            .map(|item| item.label.clone())
             .collect();
         assert_eq!(labels.len(), 2);
         assert!(labels.contains(&"Toggle Tool Results".to_string()));

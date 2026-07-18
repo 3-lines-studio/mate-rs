@@ -235,6 +235,7 @@ impl super::ConfigScreen {
                 self.config.providers.push(ProviderConfig {
                     id: trimmed.to_string(),
                     base_url: String::new(),
+                    open_router: false,
                     api_key: String::new(),
                 });
             }

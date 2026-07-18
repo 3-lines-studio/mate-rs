@@ -48,7 +48,8 @@ impl super::AgentSession {
                 }
                 Err(e) => {
                     log::warn!("ancestry load failed error={}", e);
-                    Vec::new()
+                    let _ = events.send(Event::error_msg(&e.to_string())).await;
+                    return;
                 }
             }
         };
@@ -62,16 +63,11 @@ impl super::AgentSession {
                     let stream_dur = t0.elapsed();
                     if !result.tool_calls.is_empty() {
                         if !result.content.is_empty() {
-                            self.working_messages.push(Message {
-                                role: Role::Assistant,
-                                content: result.content.clone(),
-                                reasoning_content: result.reasoning.clone(),
-                                reasoning_details: vec![],
-                                tool_calls: vec![],
-                                tool_call_id: String::new(),
-                                name: String::new(),
-                                tool_duration: String::new(),
-                            });
+                            self.working_messages.push(assistant_msg(
+                                result.content.clone(),
+                                result.reasoning.clone(),
+                                vec![],
+                            ));
                         }
                         let t0 = std::time::Instant::now();
                         let pending = self.execute_tools(&result.tool_calls, events).await;
@@ -99,16 +95,11 @@ impl super::AgentSession {
                         || !result.reasoning.is_empty()
                         || !result.reasoning_details.is_empty()
                     {
-                        self.working_messages.push(Message {
-                            role: Role::Assistant,
-                            content: result.content,
-                            reasoning_content: result.reasoning,
-                            reasoning_details: result.reasoning_details,
-                            tool_calls: vec![],
-                            tool_call_id: String::new(),
-                            name: String::new(),
-                            tool_duration: String::new(),
-                        });
+                        self.working_messages.push(assistant_msg(
+                            result.content,
+                            result.reasoning,
+                            result.reasoning_details,
+                        ));
                     }
                     let t0 = std::time::Instant::now();
                     self.commit_turn(&parent_id).await;
@@ -309,5 +300,22 @@ impl super::AgentSession {
         }
 
         self.working_messages.clear();
+    }
+}
+
+fn assistant_msg(
+    content: String,
+    reasoning_content: String,
+    reasoning_details: Vec<crate::message::ReasoningDetail>,
+) -> Message {
+    Message {
+        role: Role::Assistant,
+        content,
+        reasoning_content,
+        reasoning_details,
+        tool_calls: vec![],
+        tool_call_id: String::new(),
+        name: String::new(),
+        tool_duration: String::new(),
     }
 }

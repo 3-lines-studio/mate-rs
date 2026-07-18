@@ -296,9 +296,12 @@ fn execute_symbols(mut p: SymbolsParams) -> Result<String, String> {
 fn load_index(root: &str) -> IndexData {
     let path = Path::new(root).join(INDEX_FILE);
     match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or(IndexData {
-            files: HashMap::new(),
-            defs: Vec::new(),
+        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+            log::warn!("index parse failed, rebuilding {}: {}", path.display(), e);
+            IndexData {
+                files: HashMap::new(),
+                defs: Vec::new(),
+            }
         }),
         Err(_) => IndexData {
             files: HashMap::new(),
@@ -348,19 +351,26 @@ fn process_file(root: &Path, rel: &str, mtime: f64) -> Result<Vec<IndexDef>, Str
     Ok(defs)
 }
 
+fn parse_source(
+    source: &str,
+    language: &tree_sitter::Language,
+) -> Result<tree_sitter::Tree, String> {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(language)
+        .map_err(|e| format!("index: {}", e))?;
+    parser
+        .parse(source, None)
+        .ok_or_else(|| "index: parse returned None".to_string())
+}
+
 fn extract_defs(
     source: &str,
     rel_path: &str,
     language: tree_sitter::Language,
     query_str: &str,
 ) -> Result<Vec<IndexDef>, String> {
-    let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&language)
-        .map_err(|e| format!("index: {}", e))?;
-    let tree = parser
-        .parse(source, None)
-        .ok_or_else(|| "index: parse returned None".to_string())?;
+    let tree = parse_source(source, &language)?;
 
     let query = tree_sitter::Query::new(&language, query_str)
         .map_err(|e| format!("index: query error: {}", e))?;
@@ -427,13 +437,9 @@ fn find_refs(root: &str, target: &str, max_results: i32) -> Result<String, Strin
             Err(_) => continue,
         };
 
-        let mut parser = tree_sitter::Parser::new();
-        if parser.set_language(&language).is_err() {
-            continue;
-        }
-        let tree = match parser.parse(&source, None) {
-            Some(t) => t,
-            None => continue,
+        let tree = match parse_source(&source, &language) {
+            Ok(t) => t,
+            Err(_) => continue,
         };
 
         let remaining = max - results.len();

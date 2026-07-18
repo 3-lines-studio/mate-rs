@@ -31,7 +31,7 @@ pub fn resolve_client(
         thinking_type: m.thinking_type.clone(),
         reasoning_effort: m.reasoning_effort.clone(),
         reasoning_max_tokens: m.reasoning_max_tokens,
-        open_router: is_open_router(p),
+        open_router: p.open_router,
         input_price: m.input_price,
         cached_input_price: m.cached_input_price,
         output_price: m.output_price,
@@ -58,11 +58,6 @@ pub fn resolve_client(
     let mut client = Client::new(&p.base_url, &m.name, &p.api_key, profile);
     client.set_debug(verbose);
     Ok((client, m.name.clone()))
-}
-
-pub fn is_open_router(p: &ProviderConfig) -> bool {
-    let s = format!("{} {}", p.id.to_lowercase(), p.base_url.to_lowercase());
-    s.contains("openrouter")
 }
 
 pub fn resolve_subagents(

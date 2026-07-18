@@ -1,0 +1,417 @@
+use super::*;
+use std::io::Write;
+
+fn write_file(path: &std::path::Path, content: &str) {
+    let mut f = std::fs::File::create(path).unwrap();
+    f.write_all(content.as_bytes()).unwrap();
+}
+
+#[test]
+fn test_save_tui_preserves_existing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mate_dir = dir.path().join("mate");
+    std::fs::create_dir_all(&mate_dir).unwrap();
+    let cfg_path = mate_dir.join("config.toml");
+    write_file(&cfg_path, "[agent]\nmax_tool_rounds = 10\n");
+
+    save_tui(&mate_dir.to_string_lossy(), true, false).unwrap();
+
+    let data = std::fs::read_to_string(&cfg_path).unwrap();
+    let cfg: toml::Table = toml::from_str(&data).unwrap();
+    let tui = cfg["tui"].as_table().unwrap();
+    assert!(tui["tools_expanded"].as_bool().unwrap());
+    assert!(!tui["show_thinking"].as_bool().unwrap());
+    let agent = cfg["agent"].as_table().unwrap();
+    assert_eq!(agent["max_tool_rounds"].as_integer().unwrap(), 10);
+}
+
+#[test]
+fn test_save_tui_no_existing_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mate_dir = dir.path().join("mate");
+    std::fs::create_dir_all(&mate_dir).unwrap();
+
+    save_tui(&mate_dir.to_string_lossy(), true, true).unwrap();
+
+    let cfg_path = mate_dir.join("config.toml");
+    let data = std::fs::read_to_string(&cfg_path).unwrap();
+    assert!(data.contains("tools_expanded = true"));
+}
+
+#[test]
+fn test_dir_xdg_env() {
+    assert_eq!(
+        dir_for_env("mate", Some("/tmp/xdg"), "/tmp/home"),
+        "/tmp/xdg/mate"
+    );
+}
+
+#[test]
+fn test_dir_no_xdg() {
+    assert_eq!(
+        dir_for_env("mate", None, "/tmp/home"),
+        "/tmp/home/.config/mate"
+    );
+}
+
+#[test]
+fn test_dir_for_custom_name() {
+    assert_eq!(
+        dir_for_env("alfred", Some("/tmp/xdg"), "/tmp/home"),
+        "/tmp/xdg/alfred"
+    );
+}
+
+#[test]
+fn test_dir_for_different_names_isolate() {
+    std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg");
+    let a = dir_for("agent-a");
+    let b = dir_for("agent-b");
+    assert_ne!(a, b);
+    std::env::remove_var("XDG_CONFIG_HOME");
+}
+
+#[test]
+fn test_default_for_custom_dir() {
+    let cfg = Config::default_for("/custom/dir");
+    assert_eq!(cfg.session.dir, "/custom/dir/sessions");
+}
+
+#[test]
+fn test_load_from_custom_dir() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg_path = dir.path().join("config.toml");
+    write_file(&cfg_path, "[agent]\nmax_tool_rounds = 55\n");
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.agent.max_tool_rounds, 55);
+    assert_eq!(
+        cfg.session.dir,
+        format!("{}/sessions", dir.path().to_string_lossy())
+    );
+}
+
+#[test]
+fn test_load_from_no_config_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.agent.max_tool_rounds, 99);
+}
+
+#[test]
+fn test_default() {
+    let cfg = Config::default();
+    assert_eq!(cfg.agent.max_tool_rounds, 99);
+    assert!(cfg.agent.tools.is_empty());
+    assert!(!cfg.session.dir.is_empty());
+}
+
+#[test]
+fn test_load_empty_dir() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.agent.max_tool_rounds, 99);
+}
+
+#[test]
+fn test_load_config_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg_path = dir.path().join("config.toml");
+    write_file(&cfg_path, "[agent]\nmax_tool_rounds = 42\n");
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.agent.max_tool_rounds, 42);
+}
+
+#[test]
+fn test_load_secrets_provider_merge() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        r#"
+[[providers]]
+id = "openai"
+base_url = "https://api.openai.com/v1"
+
+[[providers]]
+id = "anthropic"
+base_url = "https://api.anthropic.com/v1"
+"#,
+    );
+    write_file(
+        &dir.path().join("secrets.toml"),
+        r#"
+[providers]
+openai = "sk-openai-key"
+anthropic = "sk-anthropic-key"
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.providers.len(), 2);
+    assert_eq!(cfg.providers[0].api_key, "sk-openai-key");
+    assert_eq!(cfg.providers[0].base_url, "https://api.openai.com/v1");
+    assert_eq!(cfg.providers[1].api_key, "sk-anthropic-key");
+    assert_eq!(cfg.providers[1].base_url, "https://api.anthropic.com/v1");
+}
+
+#[test]
+fn test_load_secrets_partial_keys() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        r#"
+[[providers]]
+id = "openai"
+base_url = "https://api.openai.com/v1"
+
+[[providers]]
+id = "anthropic"
+base_url = "https://api.anthropic.com/v1"
+"#,
+    );
+    write_file(
+        &dir.path().join("secrets.toml"),
+        r#"
+[providers]
+openai = "sk-openai-key"
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.providers[0].api_key, "sk-openai-key");
+    assert_eq!(cfg.providers[1].api_key, "");
+    assert_eq!(cfg.providers[1].base_url, "https://api.anthropic.com/v1");
+}
+
+#[test]
+fn test_load_config_provider_no_api_key() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        r#"
+[[providers]]
+id = "openai"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-should-be-ignored"
+
+[[models]]
+id = "gpt4"
+provider = "openai"
+name = "gpt-4"
+context_window = 128000
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.providers.len(), 1);
+    assert_eq!(cfg.providers[0].id, "openai");
+    assert_eq!(cfg.providers[0].api_key, "");
+    assert_eq!(cfg.models.len(), 1);
+    assert_eq!(cfg.models[0].name, "gpt-4");
+}
+
+#[test]
+fn test_load_invalid_toml() {
+    let dir = tempfile::TempDir::new().unwrap();
+    write_file(&dir.path().join("config.toml"), "this is not toml {{{");
+    let result = load_from(&dir.path().to_string_lossy());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_load_model_price_fields() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        r#"
+[[providers]]
+id = "openai"
+base_url = "https://api.openai.com/v1"
+
+[[models]]
+id = "gpt-4"
+provider = "openai"
+name = "gpt-4"
+context_window = 128000
+input_price = 3.0
+cached_input_price = 0.3
+output_price = 15.0
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    let m = &cfg.models[0];
+    assert_eq!(m.input_price, 3.0);
+    assert_eq!(m.cached_input_price, 0.3);
+    assert_eq!(m.output_price, 15.0);
+}
+
+#[test]
+fn test_load_model_price_fields_default_to_zero() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        r#"
+[[providers]]
+id = "openai"
+base_url = "https://api.openai.com/v1"
+
+[[models]]
+id = "gpt-4"
+provider = "openai"
+name = "gpt-4"
+context_window = 128000
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    let m = &cfg.models[0];
+    assert_eq!(m.input_price, 0.0);
+    assert_eq!(m.cached_input_price, 0.0);
+    assert_eq!(m.output_price, 0.0);
+}
+
+#[test]
+fn test_load_tui_config() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        r#"
+[tui]
+tools_expanded = true
+show_thinking = true
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert!(cfg.tui.tools_expanded);
+    assert!(cfg.tui.show_thinking);
+}
+
+#[test]
+fn test_load_secrets_slack_merge() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("secrets.toml"),
+        r#"
+[slack]
+bot_token = "xoxb-123"
+app_token = "xapp-456"
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.slack.bot_token, "xoxb-123");
+    assert_eq!(cfg.slack.app_token, "xapp-456");
+}
+
+#[test]
+fn test_load_secrets_services_merge() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("secrets.toml"),
+        r#"
+[services.picsel]
+connection_string = "postgres://localhost:5432/db"
+api_key = "svc-key"
+"#,
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    let picsel = cfg.services.get("picsel").unwrap();
+    assert!(picsel
+        .get("connection_string")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains("postgres://"));
+}
+
+#[test]
+fn test_load_secrets_does_not_override_config() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    write_file(
+        &dir.path().join("config.toml"),
+        "[agent]\nmax_tool_rounds = 10\n",
+    );
+    write_file(
+        &dir.path().join("secrets.toml"),
+        "[agent]\nmax_tool_rounds = 77\n",
+    );
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.agent.max_tool_rounds, 10);
+}
+
+#[test]
+fn test_save_config_secrets_not_leaked() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg_path = dir.path().join("config.toml");
+    write_file(
+        &cfg_path,
+        r#"
+[agent]
+max_tool_rounds = 10
+
+[slack]
+bot_token = "xoxb-old"
+app_token = "xapp-old"
+
+[telegram]
+bot_token = "tele-old"
+allowed_users = [123]
+"#,
+    );
+
+    let mut cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    cfg.slack.bot_token = "SECRET-xoxb".to_string();
+    cfg.slack.app_token = "SECRET-xapp".to_string();
+    cfg.telegram.bot_token = "SECRET-tele".to_string();
+
+    save_config(&dir.path().to_string_lossy(), &cfg).unwrap();
+
+    let written = std::fs::read_to_string(&cfg_path).unwrap();
+    assert!(!written.contains("SECRET"));
+    assert!(written.contains("allowed_users"));
+    assert!(written.contains("max_tool_rounds = 10"));
+}
+
+#[test]
+fn test_save_config_empty_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let cfg = Config::default_for(&dir.path().to_string_lossy());
+    save_config(&dir.path().to_string_lossy(), &cfg).unwrap();
+
+    let cfg_path = dir.path().join("config.toml");
+    let data = std::fs::read_to_string(&cfg_path).unwrap();
+    assert!(data.contains("max_tool_rounds"));
+}
+
+#[test]
+fn test_save_config_does_not_leak_service_secrets() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let p = dir.path();
+    write_file(&p.join("config.toml"), "[agent]\nmax_tool_rounds = 5\n");
+    write_file(
+        &p.join("secrets.toml"),
+        "[services.picsel]\nconnection_string = \"postgres://secret-db\"\napi_key = \"SVC-SECRET-KEY\"\n",
+    );
+
+    let cfg = load_from(&p.to_string_lossy()).unwrap();
+    save_config(&p.to_string_lossy(), &cfg).unwrap();
+
+    let written = std::fs::read_to_string(p.join("config.toml")).unwrap();
+    assert!(!written.contains("secret-db"));
+    assert!(!written.contains("SVC-SECRET-KEY"));
+}

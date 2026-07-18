@@ -294,10 +294,8 @@ impl App {
                             (false, false, KeyCode::Enter)
                                 if self.chat.active_modal == Modal::Command =>
                             {
-                                if let Some((_, action)) =
-                                    self.chat.command_dropdown.selected_item()
-                                {
-                                    let action = action.clone();
+                                if let Some(item) = self.chat.command_dropdown.selected_item() {
+                                    let action = item.value.clone();
                                     self.chat.close_dropdowns();
                                     self.execute_command(&action);
                                 }
@@ -305,10 +303,8 @@ impl App {
                             (false, false, KeyCode::Enter)
                                 if self.chat.active_modal == Modal::Template =>
                             {
-                                if let Some((template, _)) =
-                                    self.chat.template_dropdown.selected_item()
-                                {
-                                    let name = template.name.clone();
+                                if let Some(item) = self.chat.template_dropdown.selected_item() {
+                                    let name = item.template.name.clone();
                                     self.chat.close_dropdowns();
                                     let val = format!("/{} ", name);
                                     self.chat.set_text(&val);
@@ -317,8 +313,8 @@ impl App {
                             (false, false, KeyCode::Enter)
                                 if self.chat.active_modal == Modal::File =>
                             {
-                                if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
-                                    let path = path.clone();
+                                if let Some(item) = self.chat.file_dropdown.selected_item() {
+                                    let path = item.label.clone();
                                     self.chat.close_dropdowns();
                                     let val = format!("{} ", path);
                                     self.chat.set_text(&val);
@@ -327,8 +323,8 @@ impl App {
                             (false, false, KeyCode::Enter)
                                 if self.chat.active_modal == Modal::Model =>
                             {
-                                if let Some((_, id)) = self.chat.model_dropdown.selected_item() {
-                                    let id = id.clone();
+                                if let Some(item) = self.chat.model_dropdown.selected_item() {
+                                    let id = item.value.clone();
                                     self.chat.close_dropdowns();
                                     self.switch_model(&id);
                                 }
@@ -373,10 +369,8 @@ impl App {
                             (false, false, KeyCode::Tab)
                                 if self.chat.active_modal == Modal::Template =>
                             {
-                                if let Some((template, _)) =
-                                    self.chat.template_dropdown.selected_item()
-                                {
-                                    let name = template.name.clone();
+                                if let Some(item) = self.chat.template_dropdown.selected_item() {
+                                    let name = item.template.name.clone();
                                     self.chat.close_dropdowns();
                                     let val = format!("/{} ", name);
                                     self.chat.set_text(&val);
@@ -385,8 +379,8 @@ impl App {
                             (false, false, KeyCode::Tab)
                                 if self.chat.active_modal == Modal::File =>
                             {
-                                if let Some((path, _)) = self.chat.file_dropdown.selected_item() {
-                                    let path = path.clone();
+                                if let Some(item) = self.chat.file_dropdown.selected_item() {
+                                    let path = item.label.clone();
                                     self.chat.close_dropdowns();
                                     let val = format!("{} ", path);
                                     self.chat.set_text(&val);

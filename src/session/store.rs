@@ -1,5 +1,6 @@
 #[cfg(test)]
 use crate::message::Message;
+use crate::session::cache::Cache;
 #[cfg(test)]
 use crate::session::types::compute_turn_id;
 use crate::session::types::{turn_label, Session, Turn, TurnMeta};
@@ -11,8 +12,7 @@ use std::path::PathBuf;
 #[derive(Clone)]
 pub struct Store {
     dir: PathBuf,
-    index_cache: HashMap<String, Vec<TurnMeta>>,
-    index_order: Vec<String>,
+    index_cache: Cache<Vec<TurnMeta>>,
 }
 
 impl Store {
@@ -22,8 +22,7 @@ impl Store {
         std::fs::create_dir_all(&dir_path)?;
         Ok(Self {
             dir: dir_path,
-            index_cache: HashMap::new(),
-            index_order: Vec::new(),
+            index_cache: Cache::new(64),
         })
     }
 
@@ -75,7 +74,6 @@ impl Store {
             return Ok(());
         }
         self.index_cache.remove(id);
-        self.index_order.retain(|sid| sid != id);
         std::fs::remove_dir_all(&dir)?;
         Ok(())
     }
@@ -101,7 +99,11 @@ impl Store {
             return;
         }
         let clean = first_message.replace('\n', " ");
-        sess.name = format!("{} - {}", sess.hash, truncate(&clean, 40));
+        sess.name = format!(
+            "{} - {}",
+            sess.hash,
+            crate::util::truncate_with_ellipsis(&clean, 40, "...")
+        );
         sess.named = true;
     }
 
@@ -121,9 +123,7 @@ impl Store {
         }
 
         let data = serde_json::to_string(turn)?;
-        let tmp_path = turn_path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, &data)?;
-        std::fs::rename(&tmp_path, &turn_path)?;
+        atomic_write(&turn_path, &data)?;
 
         let meta = TurnMeta {
             id: turn.id.clone(),
@@ -191,9 +191,7 @@ impl Store {
         std::fs::create_dir_all(&dir)?;
         let path = self.meta_path(&sess.id);
         let data = serde_json::to_string(sess)?;
-        let tmp_path = path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, &data)?;
-        std::fs::rename(&tmp_path, &path)?;
+        atomic_write(&path, &data)?;
         Ok(())
     }
 
@@ -230,19 +228,8 @@ impl Store {
             entries.push(meta);
         }
 
-        self.index_cache
-            .insert(session_id.to_string(), entries.clone());
-        self.touch_index(session_id);
+        self.index_cache.put(session_id, entries.clone());
         Ok(entries)
-    }
-
-    fn touch_index(&mut self, session_id: &str) {
-        self.index_order.retain(|sid| sid != session_id);
-        self.index_order.push(session_id.to_string());
-        while self.index_cache.len() > 64 {
-            let evict = self.index_order.remove(0);
-            self.index_cache.remove(&evict);
-        }
     }
 
     fn append_index(
@@ -259,10 +246,11 @@ impl Store {
             .open(&path)?
             .write_all(line.as_bytes())?;
 
-        if let Some(cached) = self.index_cache.get_mut(session_id) {
+        if let Some(mut cached) = self.index_cache.get(session_id).cloned() {
             cached.push(meta.clone());
+            self.index_cache.remove(session_id);
+            self.index_cache.put(session_id, cached);
         }
-        self.touch_index(session_id);
         Ok(())
     }
 
@@ -303,18 +291,14 @@ fn random_hash() -> String {
     hex::encode(bytes)
 }
 
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        return s.to_string();
-    }
-    let cut = max_len.saturating_sub(3);
-    let boundary = s
-        .char_indices()
-        .take_while(|&(i, _)| i <= cut)
-        .last()
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    format!("{}...", &s[..boundary])
+fn atomic_write(
+    path: &std::path::Path,
+    data: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, data)?;
+    std::fs::rename(&tmp_path, path)?;
+    Ok(())
 }
 
 fn expand_tilde(path: &str) -> String {
@@ -322,7 +306,7 @@ fn expand_tilde(path: &str) -> String {
         if let Ok(home) = std::env::var("HOME") {
             let mut p = PathBuf::from(home);
             if !stripped.is_empty() {
-                p.push(&stripped[1..]); // strip leading /
+                p.push(&stripped[1..]);
             }
             return p.to_string_lossy().to_string();
         }
@@ -508,12 +492,12 @@ mod tests {
     #[test]
     fn test_truncate_multibyte_safe() {
         let s = "日本語のテスト".to_string();
-        let out = truncate(&s, 5);
+        let out = crate::util::truncate_with_ellipsis(&s, 5, "...");
         assert!(out.ends_with("..."));
         let _ = std::str::from_utf8(out.as_bytes()).unwrap();
 
         let emoji = "\u{1f980}".repeat(10);
-        let out2 = truncate(&emoji, 4);
+        let out2 = crate::util::truncate_with_ellipsis(&emoji, 4, "...");
         assert!(out2.ends_with("..."));
         let _ = std::str::from_utf8(out2.as_bytes()).unwrap();
     }
@@ -860,7 +844,7 @@ mod tests {
         let sess = store.create().unwrap();
 
         commit_turn(&mut store, &sess.id, "", "hello", "hi");
-        store.turn_index(&sess.id).unwrap(); // populate cache
+        store.turn_index(&sess.id).unwrap();
 
         store.delete(&sess.id).unwrap();
 
@@ -872,9 +856,15 @@ mod tests {
 
     #[test]
     fn test_truncate() {
-        assert_eq!(truncate("hello", 10), "hello");
-        assert_eq!(truncate("hello world", 8), "hello...");
-        assert_eq!(truncate("abc", 3), "abc");
+        assert_eq!(
+            crate::util::truncate_with_ellipsis("hello", 10, "..."),
+            "hello"
+        );
+        assert_eq!(
+            crate::util::truncate_with_ellipsis("hello world", 8, "..."),
+            "hello..."
+        );
+        assert_eq!(crate::util::truncate_with_ellipsis("abc", 3, "..."), "abc");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct Cache<V> {
     entries: HashMap<String, V>,
     order: Vec<String>,
@@ -38,6 +39,18 @@ impl<V> Cache<V> {
     pub fn remove(&mut self, key: &str) {
         self.entries.remove(key);
         self.order.retain(|k| k != key);
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.entries.contains_key(key)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     fn touch(&mut self, key: &str) {

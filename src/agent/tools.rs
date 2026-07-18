@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 
+const DELEGATE_TOOL_NAME: &str = "delegate";
+
 impl super::AgentSession {
     pub(super) async fn execute_tools(
         &mut self,
@@ -26,77 +28,11 @@ impl super::AgentSession {
         for (i, tc) in tool_calls.iter().enumerate() {
             let tc = tc.clone();
             let events = events.clone();
-
-            if tc.name == "delegate" && !self.subagents_state.subagents.is_empty() {
-                let subagents = self.subagents_state.subagents.clone();
-                let store = self.store.clone();
-                let sess_id = self.sess.id.clone();
-                let max_rounds = self.max_rounds;
-                let cwd = self.cwd.clone();
-
-                set.spawn(async move {
-                    let start = std::time::Instant::now();
-                    let tc_clone = tc.clone();
-                    let events_clone = events.clone();
-                    let (result, dd) =
-                        run_delegate(tc, subagents, store, sess_id, max_rounds, cwd, events).await;
-                    let dur = format_duration(start.elapsed());
-                    let _ = events_clone
-                        .send(Event::tool_result_ev(&tc_clone, &result, &dur))
-                        .await;
-                    (i, result, dur, false, Some(dd))
-                });
-            } else {
-                let tools = self.tools.clone();
-
-                set.spawn(async move {
-                    let start = std::time::Instant::now();
-                    match tools.get(&tc.name) {
-                        None => {
-                            let msg = format!("Tool {} not found", tc.name);
-                            (i, msg, String::new(), true, None)
-                        }
-                        Some(tool) => {
-                            let args: serde_json::Value = match serde_json::from_str(&tc.arguments)
-                            {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    let msg = format!("Tool {} invalid args: {}", tc.name, e);
-                                    let dur = format_duration(start.elapsed());
-                                    return (i, msg, dur, true, None);
-                                }
-                            };
-                            let tool_result = tokio::time::timeout(
-                                std::time::Duration::from_secs(super::TOOL_TIMEOUT_SECS),
-                                (tool.execute)(args),
-                            )
-                            .await;
-                            let dur = format_duration(start.elapsed());
-                            match tool_result {
-                                Ok(Ok(result)) => {
-                                    let final_result = result;
-                                    let _ = events
-                                        .send(Event::tool_result_ev(&tc, &final_result, &dur))
-                                        .await;
-                                    (i, final_result, dur, false, None)
-                                }
-                                Ok(Err(e)) => {
-                                    let msg = format!("Tool {} error: {}", tc.name, e);
-                                    (i, msg, dur, true, None)
-                                }
-                                Err(_) => {
-                                    let msg = format!(
-                                        "Tool {} timed out after {}s",
-                                        tc.name,
-                                        super::TOOL_TIMEOUT_SECS
-                                    );
-                                    (i, msg, dur, true, None)
-                                }
-                            }
-                        }
-                    }
-                });
+            if tc.name == DELEGATE_TOOL_NAME && !self.subagents_state.subagents.is_empty() {
+                self.spawn_delegate_task(&mut set, i, tc, events);
+                continue;
             }
+            self.spawn_registry_task(&mut set, i, tc, events);
         }
 
         let mut pending: Vec<PendingTool> = (0..n)
@@ -139,6 +75,90 @@ impl super::AgentSession {
         }
 
         pending
+    }
+
+    fn spawn_delegate_task(
+        &mut self,
+        set: &mut tokio::task::JoinSet<(usize, String, String, bool, Option<DelegateData>)>,
+        i: usize,
+        tc: StreamToolCall,
+        events: mpsc::Sender<Event>,
+    ) {
+        let subagents = self.subagents_state.subagents.clone();
+        let store = self.store.clone();
+        let sess_id = self.sess.id.clone();
+        let max_rounds = self.max_rounds;
+        let cwd = self.cwd.clone();
+
+        set.spawn(async move {
+            let start = std::time::Instant::now();
+            let tc_clone = tc.clone();
+            let events_clone = events.clone();
+            let (result, dd) =
+                run_delegate(tc, subagents, store, sess_id, max_rounds, cwd, events).await;
+            let dur = format_duration(start.elapsed());
+            let _ = events_clone
+                .send(Event::tool_result_ev(&tc_clone, &result, &dur))
+                .await;
+            (i, result, dur, false, Some(dd))
+        });
+    }
+
+    fn spawn_registry_task(
+        &self,
+        set: &mut tokio::task::JoinSet<(usize, String, String, bool, Option<DelegateData>)>,
+        i: usize,
+        tc: StreamToolCall,
+        events: mpsc::Sender<Event>,
+    ) {
+        let tools = self.tools.clone();
+
+        set.spawn(async move {
+            let start = std::time::Instant::now();
+            match tools.get(&tc.name) {
+                None => {
+                    let msg = format!("Tool {} not found", tc.name);
+                    (i, msg, String::new(), true, None)
+                }
+                Some(tool) => {
+                    let args: serde_json::Value = match serde_json::from_str(&tc.arguments) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let msg = format!("Tool {} invalid args: {}", tc.name, e);
+                            let dur = format_duration(start.elapsed());
+                            return (i, msg, dur, true, None);
+                        }
+                    };
+                    let tool_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(super::TOOL_TIMEOUT_SECS),
+                        (tool.execute)(args),
+                    )
+                    .await;
+                    let dur = format_duration(start.elapsed());
+                    match tool_result {
+                        Ok(Ok(result)) => {
+                            let final_result = result;
+                            let _ = events
+                                .send(Event::tool_result_ev(&tc, &final_result, &dur))
+                                .await;
+                            (i, final_result, dur, false, None)
+                        }
+                        Ok(Err(e)) => {
+                            let msg = format!("Tool {} error: {}", tc.name, e);
+                            (i, msg, dur, true, None)
+                        }
+                        Err(_) => {
+                            let msg = format!(
+                                "Tool {} timed out after {}s",
+                                tc.name,
+                                super::TOOL_TIMEOUT_SECS
+                            );
+                            (i, msg, dur, true, None)
+                        }
+                    }
+                }
+            }
+        });
     }
 
     pub(super) fn append_tool_messages(
@@ -370,7 +390,7 @@ pub(super) fn build_delegate_def(
     ToolDef {
         def_type: "function".into(),
         function: crate::message::ToolDefFunction {
-            name: "delegate".into(),
+            name: DELEGATE_TOOL_NAME.into(),
             description: "Delegate a task to a subagent with its own model and tools. The subagent runs to completion and returns its result. Use for complex coding tasks or research that would benefit from a specialized model.".into(),
             parameters: params,
         },

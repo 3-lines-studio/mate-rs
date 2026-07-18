@@ -73,7 +73,7 @@ pub fn compute_turn_id(parent_id: &str, messages: &[Message]) -> String {
     hasher.update(parent_id.as_bytes());
     for msg in messages {
         hasher.update([0u8]);
-        let json = serde_json::to_string(msg).unwrap();
+        let json = serde_json::to_string(msg).expect("message serialization infallible");
         hasher.update(json.as_bytes());
     }
     let result = hasher.finalize();
@@ -84,16 +84,7 @@ pub fn turn_label(messages: &[Message]) -> String {
     for msg in messages {
         if msg.role == Role::User && !msg.content.is_empty() {
             let clean = msg.content.replace('\n', " ");
-            if clean.chars().count() > 40 {
-                let cut = clean
-                    .char_indices()
-                    .take_while(|&(i, _)| i <= 37)
-                    .last()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                return format!("{}...", &clean[..cut]);
-            }
-            return clean;
+            return crate::util::truncate_with_ellipsis(&clean, 40, "...");
         }
     }
     "(empty)".to_string()

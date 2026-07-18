@@ -57,19 +57,18 @@ pub struct ChatScreen {
     pub scroll_to_bottom: bool,
 
     pub active_modal: Modal,
-    pub command_dropdown: super::chat_dropdowns::Dropdown<(String, String)>,
+    pub command_dropdown: super::chat_dropdowns::Dropdown<super::chat_dropdowns::LabeledItem>,
     pub command_query: String,
-    pub model_dropdown: super::chat_dropdowns::Dropdown<(String, String)>,
-    pub template_dropdown: super::chat_dropdowns::Dropdown<(Template, String)>,
-    pub file_dropdown: super::chat_dropdowns::Dropdown<(String, String)>,
-    pub tree_dropdown:
-        super::chat_dropdowns::Dropdown<(String, String, usize, bool, Vec<bool>, bool)>,
+    pub model_dropdown: super::chat_dropdowns::Dropdown<super::chat_dropdowns::LabeledItem>,
+    pub template_dropdown: super::chat_dropdowns::Dropdown<super::chat_dropdowns::TemplateItem>,
+    pub file_dropdown: super::chat_dropdowns::Dropdown<super::chat_dropdowns::LabeledItem>,
+    pub tree_dropdown: super::chat_dropdowns::Dropdown<super::chat_dropdowns::TreeItem>,
 
     pub all_files: Vec<String>,
     pub files_loaded: bool,
-    pub all_template_items: Vec<(Template, String)>,
+    pub all_template_items: Vec<super::chat_dropdowns::TemplateItem>,
     pub templates: Vec<Template>,
-    pub tree_items: Vec<(String, String, usize, bool, Vec<bool>, bool)>,
+    pub tree_items: Vec<super::chat_dropdowns::TreeItem>,
 
     pub renderer: StreamRenderer,
     pub width: u16,
@@ -86,9 +85,12 @@ impl ChatScreen {
         show_thinking: bool,
         tools_expanded: bool,
     ) -> Self {
-        let tmpl_items: Vec<(Template, String)> = templates
+        let tmpl_items: Vec<super::chat_dropdowns::TemplateItem> = templates
             .iter()
-            .map(|t| (t.clone(), t.name.clone()))
+            .map(|t| super::chat_dropdowns::TemplateItem {
+                template: t.clone(),
+                search_key: t.name.clone(),
+            })
             .collect();
 
         ChatScreen {
@@ -344,8 +346,14 @@ mod tests {
                     }
                     if modal == Modal::Model {
                         s.model_dropdown.items = vec![
-                            ("gpt-4o".to_string(), "gpt-4o".to_string()),
-                            ("claude".to_string(), "claude-3.5-sonnet".to_string()),
+                            crate::tui::chat_dropdowns::LabeledItem {
+                                label: "gpt-4o".to_string(),
+                                value: "gpt-4o".to_string(),
+                            },
+                            crate::tui::chat_dropdowns::LabeledItem {
+                                label: "claude".to_string(),
+                                value: "claude-3.5-sonnet".to_string(),
+                            },
                         ];
                         s.model_dropdown.selected = 0;
                     }

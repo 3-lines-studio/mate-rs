@@ -31,39 +31,49 @@ pub struct Message {
 
 impl Serialize for Message {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut msg = self.clone();
-        if msg.role == Role::Assistant && msg.content.is_empty() && msg.tool_calls.is_empty() {
-            msg.content = " ".to_string();
+        use serde::ser::SerializeStruct;
+        let pad =
+            self.role == Role::Assistant && self.content.is_empty() && self.tool_calls.is_empty();
+        let mut st = serializer.serialize_struct("Message", 8)?;
+        st.serialize_field("role", &self.role)?;
+        if pad {
+            st.serialize_field("content", " ")?;
+        } else if !self.content.is_empty() {
+            st.serialize_field("content", &self.content)?;
+        } else {
+            st.skip_field("content")?;
         }
-        #[derive(Serialize)]
-        struct Helper {
-            role: Role,
-            #[serde(skip_serializing_if = "String::is_empty")]
-            content: String,
-            #[serde(skip_serializing_if = "String::is_empty")]
-            reasoning_content: String,
-            #[serde(skip_serializing_if = "Vec::is_empty")]
-            reasoning_details: Vec<ReasoningDetail>,
-            #[serde(skip_serializing_if = "Vec::is_empty")]
-            tool_calls: Vec<ToolCall>,
-            #[serde(skip_serializing_if = "String::is_empty")]
-            tool_call_id: String,
-            #[serde(skip_serializing_if = "String::is_empty")]
-            name: String,
-            #[serde(skip_serializing_if = "String::is_empty")]
-            tool_duration: String,
+        if !self.reasoning_content.is_empty() {
+            st.serialize_field("reasoning_content", &self.reasoning_content)?;
+        } else {
+            st.skip_field("reasoning_content")?;
         }
-        Helper {
-            role: msg.role,
-            content: msg.content,
-            reasoning_content: msg.reasoning_content,
-            reasoning_details: msg.reasoning_details,
-            tool_calls: msg.tool_calls,
-            tool_call_id: msg.tool_call_id,
-            name: msg.name,
-            tool_duration: msg.tool_duration,
+        if !self.reasoning_details.is_empty() {
+            st.serialize_field("reasoning_details", &self.reasoning_details)?;
+        } else {
+            st.skip_field("reasoning_details")?;
         }
-        .serialize(serializer)
+        if !self.tool_calls.is_empty() {
+            st.serialize_field("tool_calls", &self.tool_calls)?;
+        } else {
+            st.skip_field("tool_calls")?;
+        }
+        if !self.tool_call_id.is_empty() {
+            st.serialize_field("tool_call_id", &self.tool_call_id)?;
+        } else {
+            st.skip_field("tool_call_id")?;
+        }
+        if !self.name.is_empty() {
+            st.serialize_field("name", &self.name)?;
+        } else {
+            st.skip_field("name")?;
+        }
+        if !self.tool_duration.is_empty() {
+            st.serialize_field("tool_duration", &self.tool_duration)?;
+        } else {
+            st.skip_field("tool_duration")?;
+        }
+        st.end()
     }
 }
 
