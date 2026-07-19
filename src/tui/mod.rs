@@ -25,11 +25,19 @@ use chat_render::{render_shortcuts_bar, render_top_bar};
 use config_editor::ConfigScreen;
 use session_list::SessionListScreen;
 
+enum ConfirmKind {
+    DeleteSession(Session),
+    DeleteConfigItem,
+    DiscardConfig,
+    QuitUnsaved,
+    AbortResponse,
+}
+
 enum AppState {
     SessionList,
     Chat,
     Config,
-    ConfirmDelete(Session),
+    Confirm(ConfirmKind),
 }
 
 pub struct App {
@@ -162,9 +170,17 @@ impl App {
             AppState::Config => {
                 self.config_screen.render(f);
             }
-            AppState::ConfirmDelete(ref session) => {
-                let name = &session.name;
-                let dialog = format!("Delete \"{}\"?\n\n[y] yes  [n] no  [esc] cancel", name);
+            AppState::Confirm(ref kind) => {
+                let msg = match kind {
+                    ConfirmKind::DeleteSession(s) => format!("Delete \"{}\"?", s.name),
+                    ConfirmKind::DeleteConfigItem => "Delete this item?".to_string(),
+                    ConfirmKind::DiscardConfig => "Discard unsaved config changes?".to_string(),
+                    ConfirmKind::QuitUnsaved => {
+                        "Quit and discard the running response?".to_string()
+                    }
+                    ConfirmKind::AbortResponse => "Abort the running response?".to_string(),
+                };
+                let dialog = format!("{}\n\n[y] yes  [n] no  [esc] cancel", msg);
                 let p = ratatui::widgets::Paragraph::new(dialog)
                     .style(ratatui::style::Style::default().fg(crate::tui::theme::COLORS.error))
                     .block(
@@ -198,19 +214,54 @@ impl App {
                     AppState::Config => {
                         if let Some(true) = self.config_screen.handle_key(key) {
                             self.state = AppState::SessionList;
+                        } else if self.config_screen.take_pending_delete() {
+                            self.state = AppState::Confirm(ConfirmKind::DeleteConfigItem);
+                        } else if self.config_screen.take_pending_close() {
+                            self.state = AppState::Confirm(ConfirmKind::DiscardConfig);
                         }
                     }
-                    AppState::ConfirmDelete(_) => match code {
+                    AppState::Confirm(_) => match code {
                         KeyCode::Char('y') => {
-                            if let AppState::ConfirmDelete(ref sess) = self.state {
-                                let sid = sess.id.clone();
-                                let _ = self.deps.store.delete(&sid);
-                                self.session_list.load(&mut self.deps.store);
-                                self.state = AppState::SessionList;
+                            if let AppState::Confirm(ref k) = self.state {
+                                match k {
+                                    ConfirmKind::DeleteSession(ref sess) => {
+                                        let sid = sess.id.clone();
+                                        let _ = self.deps.store.delete(&sid);
+                                        self.session_list.load(&mut self.deps.store);
+                                        self.state = AppState::SessionList;
+                                    }
+                                    ConfirmKind::DeleteConfigItem => {
+                                        self.config_screen.confirm_delete_item();
+                                        self.state = AppState::Config;
+                                    }
+                                    ConfirmKind::DiscardConfig => {
+                                        self.config_screen.reload();
+                                        self.state = AppState::SessionList;
+                                    }
+                                    ConfirmKind::QuitUnsaved => {
+                                        self.should_quit = true;
+                                    }
+                                    ConfirmKind::AbortResponse => {
+                                        self.do_abort_response();
+                                        self.state = AppState::Chat;
+                                    }
+                                }
                             }
                         }
                         KeyCode::Char('n') | KeyCode::Esc => {
-                            self.state = AppState::SessionList;
+                            if let AppState::Confirm(ref k) = self.state {
+                                match k {
+                                    ConfirmKind::DeleteSession(_) => {
+                                        self.state = AppState::SessionList;
+                                    }
+                                    ConfirmKind::DeleteConfigItem | ConfirmKind::DiscardConfig => {
+                                        self.state = AppState::Config;
+                                    }
+                                    ConfirmKind::QuitUnsaved | ConfirmKind::AbortResponse => {
+                                        self.state = AppState::Chat;
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     },
@@ -242,7 +293,8 @@ impl App {
                         }
                         KeyCode::Char('d') => {
                             if let Some(session) = self.session_list.selected_session() {
-                                self.state = AppState::ConfirmDelete(session.clone());
+                                self.state =
+                                    AppState::Confirm(ConfirmKind::DeleteSession(session.clone()));
                             }
                         }
                         _ => {}
@@ -263,7 +315,7 @@ impl App {
                                     .map(|t| t.elapsed() < Duration::from_millis(1500))
                                     .unwrap_or(false);
                                 if armed {
-                                    self.should_quit = true;
+                                    self.request_quit();
                                 } else {
                                     self.chat.ctrl_c_armed_at = Some(Instant::now());
                                 }
@@ -274,19 +326,7 @@ impl App {
                                     return;
                                 }
                                 if self.chat.waiting || self.chat.compacting {
-                                    if let Some(h) = self.chat.abort_handle.take() {
-                                        h.abort();
-                                    }
-                                    self.chat.events = None;
-                                    self.chat.finish_bot_message_now();
-                                    if let Some(last) = self.chat.messages.last_mut() {
-                                        if last.role == "assistant" {
-                                            last.stopped = true;
-                                            last.rendered.clear();
-                                        }
-                                    }
-                                    self.chat.waiting = false;
-                                    self.chat.compacting = false;
+                                    self.state = AppState::Confirm(ConfirmKind::AbortResponse);
                                     return;
                                 }
                                 self.reload_current_session();
@@ -528,6 +568,30 @@ impl App {
         }
     }
 
+    fn do_abort_response(&mut self) {
+        if let Some(h) = self.chat.abort_handle.take() {
+            h.abort();
+        }
+        self.chat.events = None;
+        self.chat.finish_bot_message_now();
+        if let Some(last) = self.chat.messages.last_mut() {
+            if last.role == "assistant" {
+                last.stopped = true;
+                last.rendered.clear();
+            }
+        }
+        self.chat.waiting = false;
+        self.chat.compacting = false;
+    }
+
+    fn request_quit(&mut self) {
+        if self.chat.waiting {
+            self.state = AppState::Confirm(ConfirmKind::QuitUnsaved);
+        } else {
+            self.should_quit = true;
+        }
+    }
+
     fn submit_prompt(&mut self) {
         let text = self.chat.textarea_value().to_string();
         if text.trim().is_empty() {
@@ -706,7 +770,7 @@ impl App {
                 self.chat.open_model_dropdown(&self.deps.config.models);
             }
             "quit" => {
-                self.should_quit = true;
+                self.request_quit();
             }
             _ => {}
         }

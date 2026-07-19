@@ -26,6 +26,8 @@ pub struct ConfigScreen {
     dirty: bool,
     msg: String,
     pending_add_section: Option<usize>,
+    pub(crate) pending_delete: bool,
+    pub(crate) pending_close: bool,
 }
 
 impl ConfigScreen {
@@ -43,6 +45,8 @@ impl ConfigScreen {
             dirty: false,
             msg: String::new(),
             pending_add_section: None,
+            pending_delete: false,
+            pending_close: false,
         };
         s.rebuild_rows();
         s
@@ -57,6 +61,38 @@ impl ConfigScreen {
         self.edit = Edit::None;
         self.dirty = false;
         self.msg = String::new();
+        self.rebuild_rows();
+    }
+
+    pub fn take_pending_delete(&mut self) -> bool {
+        std::mem::take(&mut self.pending_delete)
+    }
+
+    pub fn take_pending_close(&mut self) -> bool {
+        std::mem::take(&mut self.pending_close)
+    }
+
+    pub fn confirm_delete_item(&mut self) {
+        self.msg.clear();
+        let Some((si, ii)) = self.item_at_cursor() else {
+            return;
+        };
+        match si {
+            4 => {
+                self.config.providers.remove(ii);
+            }
+            5 => {
+                self.config.models.remove(ii);
+            }
+            6 => {
+                self.config.subagents.remove(ii);
+            }
+            7 => {
+                self.config.schedule.jobs.remove(ii);
+            }
+            _ => return,
+        }
+        self.dirty = true;
         self.rebuild_rows();
     }
 
@@ -107,6 +143,10 @@ impl ConfigScreen {
             }
             KeyCode::Enter => self.enter(),
             KeyCode::Esc => {
+                if self.dirty {
+                    self.pending_close = true;
+                    return None;
+                }
                 self.msg.clear();
                 return Some(true);
             }

@@ -555,7 +555,8 @@ impl ChatScreen {
             } else {
                 "Thinking…"
             };
-            let mut indicator = thinking_indicator(self.wait_ticks, label, self.wait_start.elapsed());
+            let mut indicator =
+                thinking_indicator(self.wait_ticks, label, self.wait_start.elapsed());
             indicator.push_span(Span::styled(
                 "  Esc to stop",
                 Style::default().fg(COLORS.placeholder),

@@ -95,26 +95,9 @@ impl super::ConfigScreen {
 
     pub(super) fn delete_item(&mut self) {
         self.msg.clear();
-        let Some((si, ii)) = self.item_at_cursor() else {
-            return;
-        };
-        match si {
-            4 => {
-                self.config.providers.remove(ii);
-            }
-            5 => {
-                self.config.models.remove(ii);
-            }
-            6 => {
-                self.config.subagents.remove(ii);
-            }
-            7 => {
-                self.config.schedule.jobs.remove(ii);
-            }
-            _ => return,
+        if self.item_at_cursor().is_some() {
+            self.pending_delete = true;
         }
-        self.dirty = true;
-        self.rebuild_rows();
     }
 
     pub(super) fn handle_text_key(&mut self, key: KeyEvent) -> Option<bool> {

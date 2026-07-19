@@ -256,12 +256,17 @@ impl AgentSession {
         self.client = client;
     }
 
-    pub fn prompt_with_handle(&mut self, user_text: &str) -> (mpsc::Receiver<Event>, tokio::task::JoinHandle<()>) {
+    pub fn prompt_with_handle(
+        &mut self,
+        user_text: &str,
+    ) -> (mpsc::Receiver<Event>, tokio::task::JoinHandle<()>) {
         self.last_prompt = user_text.to_string();
         let (tx, rx) = mpsc::channel(100);
         let mut s = self.clone();
         let ut = user_text.to_string();
-        let handle = tokio::spawn(async move { s.run_loop(&ut, &tx).await; });
+        let handle = tokio::spawn(async move {
+            s.run_loop(&ut, &tx).await;
+        });
         (rx, handle)
     }
 
