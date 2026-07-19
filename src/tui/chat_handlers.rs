@@ -110,6 +110,7 @@ pub struct ChatMsg {
     pub content: String,
     pub segments: Vec<Segment>,
     pub rendered: String,
+    pub stopped: bool,
 }
 
 impl ChatMsg {
@@ -119,6 +120,7 @@ impl ChatMsg {
             content: content.into(),
             segments: vec![],
             rendered: String::new(),
+            stopped: false,
         }
     }
 
@@ -128,6 +130,7 @@ impl ChatMsg {
             content: String::new(),
             segments,
             rendered: String::new(),
+            stopped: false,
         }
     }
 
@@ -137,6 +140,7 @@ impl ChatMsg {
             content: content.into(),
             segments: vec![],
             rendered: String::new(),
+            stopped: false,
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::message::Message;
 use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -289,7 +289,11 @@ impl ChatScreen {
                 parts.push(content);
             }
         }
-        parts.join("\n\n")
+        let mut rendered = parts.join("\n\n");
+        if msg.stopped {
+            rendered.push_str("\n\x1b[2m[stopped]\x1b[0m");
+        }
+        rendered
     }
 
     fn render_live_turn(&self) -> String {
@@ -551,7 +555,11 @@ impl ChatScreen {
             } else {
                 "Thinking…"
             };
-            let indicator = thinking_indicator(self.wait_ticks, label, self.wait_start.elapsed());
+            let mut indicator = thinking_indicator(self.wait_ticks, label, self.wait_start.elapsed());
+            indicator.push_span(Span::styled(
+                "  Esc to stop",
+                Style::default().fg(COLORS.placeholder),
+            ));
             let top = bottom_area.y + y_offset;
             if fit_height(area, top, 1).is_some() {
                 let thinking_area = Rect::new(

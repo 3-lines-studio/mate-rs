@@ -252,12 +252,6 @@ impl App {
                         self.chat.blink_at = Instant::now();
                         match (ctrl, alt, code) {
                             (true, false, KeyCode::Char('c')) => {
-                                if self.chat.waiting || self.chat.compacting {
-                                    self.chat.finish_bot_message_now();
-                                    self.chat.waiting = false;
-                                    self.chat.compacting = false;
-                                    return;
-                                }
                                 if !self.chat.textarea.is_empty() {
                                     self.chat.clear_textarea();
                                     self.chat.ctrl_c_armed_at = Some(Instant::now());
@@ -280,8 +274,17 @@ impl App {
                                     return;
                                 }
                                 if self.chat.waiting || self.chat.compacting {
+                                    if let Some(h) = self.chat.abort_handle.take() {
+                                        h.abort();
+                                    }
                                     self.chat.events = None;
                                     self.chat.finish_bot_message_now();
+                                    if let Some(last) = self.chat.messages.last_mut() {
+                                        if last.role == "assistant" {
+                                            last.stopped = true;
+                                            last.rendered.clear();
+                                        }
+                                    }
                                     self.chat.waiting = false;
                                     self.chat.compacting = false;
                                     return;
@@ -553,15 +556,16 @@ impl App {
             self.chat.active_session = Some(asession);
         }
 
-        let events = {
+        let (events, handle) = {
             if let Some(ref mut asession) = self.chat.active_session {
-                asession.prompt(&expanded)
+                asession.prompt_with_handle(&expanded)
             } else {
                 return;
             }
         };
 
         self.chat.events = Some(events);
+        self.chat.abort_handle = Some(handle);
         self.chat.waiting = true;
         self.chat.wait_start = Instant::now();
         self.chat.wait_ticks = 0;

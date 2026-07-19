@@ -30,6 +30,7 @@ pub struct ChatScreen {
     pub wait_start: Instant,
     pub wait_ticks: usize,
     pub events: Option<tokio::sync::mpsc::Receiver<Event>>,
+    pub abort_handle: Option<tokio::task::JoinHandle<()>>,
     pub session_name: String,
     pub model_name: String,
     pub cwd: String,
@@ -101,6 +102,7 @@ impl ChatScreen {
             wait_start: Instant::now(),
             wait_ticks: 0,
             events: None,
+            abort_handle: None,
             session_name: String::new(),
             model_name: String::new(),
             cwd,
@@ -175,6 +177,7 @@ impl ChatScreen {
         self.retry_available = false;
         self.ctrl_c_armed_at = None;
         self.finished = false;
+        self.abort_handle = None;
     }
 
     pub fn scroll_to_bottom(&mut self) {
@@ -215,6 +218,7 @@ impl ChatScreen {
     }
 
     pub fn finish_bot_message_now(&mut self) {
+        self.abort_handle = None;
         finish_bot_message(&mut self.live_blocks, &mut self.messages, &self.cwd);
         self.waiting = false;
         self.files_loaded = false;

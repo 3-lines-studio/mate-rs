@@ -210,6 +210,9 @@ impl super::AgentSession {
         };
 
         while let Some(ev) = rx.recv().await {
+            if events.is_closed() {
+                break;
+            }
             match ev {
                 StreamEvent::Error { error } => return Err(error),
                 StreamEvent::TextDelta { delta } => {
