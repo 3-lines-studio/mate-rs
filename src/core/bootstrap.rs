@@ -106,12 +106,10 @@ pub fn init(
     config_dir: &str,
 ) -> Result<Deps, Box<dyn std::error::Error + Send + Sync>> {
     let level = if verbose { "debug" } else { "info" };
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(level),
-    )
-    .format_timestamp_secs()
-    .try_init()
-    .ok();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level))
+        .format_timestamp_secs()
+        .try_init()
+        .ok();
 
     let cfg_dir = if config_dir.is_empty() {
         crate::config::dir()

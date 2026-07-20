@@ -49,6 +49,14 @@ struct PostMessageResp {
 }
 
 #[derive(Deserialize)]
+struct UploadUrlResp {
+    ok: bool,
+    error: Option<String>,
+    upload_url: Option<String>,
+    file_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct Envelope {
     #[serde(rename = "type")]
     env_type: String,
@@ -237,39 +245,120 @@ async fn upload_images(
     for img_path in images {
         let path = std::path::Path::new(img_path);
         let filename = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n,
+            Some(n) => n.to_string(),
             None => continue,
         };
         let file_body = match std::fs::read(path) {
             Ok(b) => b,
-            Err(_) => continue,
+            Err(e) => {
+                log::warn!("slack upload {}: read {}", filename, e);
+                continue;
+            }
         };
+        let length = file_body.len();
+        let length_str = length.to_string();
 
-        let part = reqwest::multipart::Part::bytes(file_body).file_name(filename.to_string());
+        let mut filename_enc = String::with_capacity(filename.len());
+        for byte in filename.bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    filename_enc.push(byte as char);
+                }
+                _ => filename_enc.push_str(&format!("%{:02X}", byte)),
+            }
+        }
+        let endpoint = format!(
+            "{}?filename={}&length={}",
+            api_url("files.getUploadURLExternal"),
+            filename_enc,
+            length_str,
+        );
 
-        let form = reqwest::multipart::Form::new()
-            .part("file", part)
-            .text("channels", channel.to_string())
-            .text("thread_ts", thread_ts.to_string());
-
-        let resp = client
-            .post(api_url("files.upload"))
+        let resp: UploadUrlResp = match client
+            .post(&endpoint)
             .header("Authorization", format!("Bearer {}", bot_token))
-            .multipart(form)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+        {
+            Ok(r) => match r.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("slack upload {}: getUploadURL parse: {}", filename, e);
+                    continue;
+                }
+            },
+            Err(e) => {
+                log::error!("slack upload {}: getUploadURL: {}", filename, e);
+                continue;
+            }
+        };
+        if !resp.ok {
+            log::error!(
+                "slack upload {}: getUploadURL: {}",
+                filename,
+                resp.error.unwrap_or_default()
+            );
+            continue;
+        }
+        let upload_url = resp.upload_url.unwrap_or_default();
+        let file_id = resp.file_id.unwrap_or_default();
+        if upload_url.is_empty() || file_id.is_empty() {
+            log::error!("slack upload {}: getUploadURL: missing url/id", filename);
+            continue;
+        }
+
+        if let Err(e) = client
+            .post(&upload_url)
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", length_str.as_str())
+            .body(file_body)
             .timeout(Duration::from_secs(60))
             .send()
-            .await;
+            .await
+        {
+            log::error!("slack upload {}: upload to url: {}", filename, e);
+            continue;
+        }
 
-        match resp {
-            Ok(r) if r.status().is_success() => {
-                let _ = std::fs::remove_file(path);
-            }
-            Ok(r) => {
-                log::error!("slack upload {}: HTTP {}", filename, r.status());
-            }
+        let mut body = serde_json::json!({
+            "files": [{"id": file_id, "title": filename}],
+            "channel_id": channel,
+        });
+        if !thread_ts.is_empty() {
+            body["thread_ts"] = serde_json::Value::String(thread_ts.to_string());
+        }
+        let ok = match client
+            .post(api_url("files.completeUploadExternal"))
+            .header("Authorization", format!("Bearer {}", bot_token))
+            .json(&body)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+        {
+            Ok(r) => match r.json::<SlackApiResp>().await {
+                Ok(resp) => {
+                    if !resp.ok {
+                        log::error!(
+                            "slack upload {}: completeUpload: {}",
+                            filename,
+                            resp.error.unwrap_or_default()
+                        );
+                    }
+                    resp.ok
+                }
+                Err(e) => {
+                    log::error!("slack upload {}: completeUpload parse: {}", filename, e);
+                    false
+                }
+            },
             Err(e) => {
-                log::error!("slack upload {}: {}", filename, e);
+                log::error!("slack upload {}: completeUpload: {}", filename, e);
+                false
             }
+        };
+        if ok {
+            let _ = std::fs::remove_file(path);
         }
     }
 }
