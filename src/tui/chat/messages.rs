@@ -396,6 +396,9 @@ impl ChatScreen {
             if self.active_modal == super::Modal::Command {
                 h += (self.command_dropdown.items.len() + 3) as u16;
             }
+            if self.active_modal == super::Modal::Model {
+                h += (self.model_dropdown.items.len() + 3) as u16;
+            }
             if self.active_modal == super::Modal::Tree {
                 h += 6;
             }
@@ -410,6 +413,9 @@ impl ChatScreen {
         }
         if self.active_modal == super::Modal::Command {
             h += (self.command_dropdown.items.len() + 3) as u16;
+        }
+        if self.active_modal == super::Modal::Model {
+            h += (self.model_dropdown.items.len() + 3) as u16;
         }
         if self.active_modal == super::Modal::Tree {
             h += 6;
@@ -452,7 +458,7 @@ impl ChatScreen {
                             Style::default().fg(COLORS.muted),
                         )
                     },
-                    false,
+                    true,
                 );
             }
             y_offset += h;
@@ -479,7 +485,7 @@ impl ChatScreen {
                             Style::default().fg(COLORS.muted),
                         )
                     },
-                    false,
+                    true,
                 );
             }
             y_offset += h;
