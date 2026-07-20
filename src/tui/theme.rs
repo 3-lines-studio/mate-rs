@@ -12,6 +12,7 @@ fn rgb(hex: &str) -> Color {
 }
 
 pub struct Colors {
+    pub bg: Color,
     pub fg: Color,
     pub accent: Color,
     pub muted: Color,
@@ -19,9 +20,11 @@ pub struct Colors {
     pub error: Color,
     pub border: Color,
     pub selected: Color,
+    pub green: Color,
 }
 
 pub static COLORS: Lazy<Colors> = Lazy::new(|| Colors {
+    bg: rgb(VESPER.bg),
     fg: rgb(VESPER.fg),
     accent: rgb(VESPER.accent),
     muted: rgb(VESPER.muted),
@@ -29,6 +32,7 @@ pub static COLORS: Lazy<Colors> = Lazy::new(|| Colors {
     error: rgb(VESPER.error),
     border: rgb(VESPER.border),
     selected: rgb(VESPER.selected),
+    green: rgb(VESPER.string),
 });
 
 pub const THEME: &crate::render::theme::Theme = &VESPER;

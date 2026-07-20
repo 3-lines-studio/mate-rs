@@ -1,10 +1,10 @@
 use super::textarea::textarea_cursor_xy;
-use super::{ChatScreen, fit_height, fmt_cost, fmt_tokens, shorten_cwd_string};
+use super::{ChatScreen, fit_height, fmt_cost, shorten_cwd_string};
 use crate::message::Message;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
 };
@@ -594,16 +594,45 @@ impl ChatScreen {
             let border_color = COLORS.border;
             let dim = Style::default().fg(COLORS.placeholder);
 
-            let mut parts = vec![format!(
-                "{} / {}",
-                fmt_tokens(self.total_tokens),
-                fmt_tokens(self.context_window),
-            )];
+            let ctx_frac = if self.context_window > 0 {
+                self.total_tokens as f64 / self.context_window as f64
+            } else {
+                0.0
+            };
+            let cache_frac = if self.total_tokens > 0 {
+                self.cache_hit_tokens as f64 / self.total_tokens as f64
+            } else {
+                0.0
+            };
+            let ctx_color = if ctx_frac >= 0.9 {
+                COLORS.error
+            } else {
+                COLORS.green
+            };
+            let mut stats_spans: Vec<Span<'static>> = Vec::new();
+            stats_spans.push(Span::styled(" ", dim));
+            stats_spans.extend(bar_with_text(
+                ctx_frac,
+                &format!("{:.0}%", ctx_frac * 100.0),
+                ctx_color,
+            ));
             if self.cache_hit_tokens > 0 {
-                parts.push(format!("cache {}", fmt_tokens(self.cache_hit_tokens)));
+                stats_spans.push(Span::styled(" · ", dim));
+                stats_spans.extend(bar_with_text(
+                    cache_frac,
+                    &format!("{:.0}%", cache_frac * 100.0),
+                    COLORS.green,
+                ));
             }
-            parts.push(fmt_cost(self.total_cost));
-            let stats = Line::styled(format!(" {} ", parts.join(" · ")), dim).right_aligned();
+            if self.total_cost > 0.0 {
+                stats_spans.push(Span::styled(
+                    format!(" · {} ", fmt_cost(self.total_cost)),
+                    dim,
+                ));
+            } else {
+                stats_spans.push(Span::styled(" ", dim));
+            }
+            let stats = Line::from(stats_spans).right_aligned();
             let info = Line::styled(format!(" {} · {} ", self.model_name, branch_or_cwd), dim)
                 .right_aligned();
 
@@ -645,4 +674,37 @@ impl ChatScreen {
             }
         }
     }
+}
+
+fn bar_with_text(fraction: f64, label: &str, full_color: Color) -> Vec<Span<'static>> {
+    const WIDTH: usize = 10;
+    let filled = ((fraction.clamp(0.0, 1.0) * WIDTH as f64).round() as usize).min(WIDTH);
+    let track = COLORS.selected;
+    let chars: Vec<char> = label.chars().collect();
+    let label_len = chars.len().min(WIDTH);
+    let label_start = WIDTH.saturating_sub(label_len).div_ceil(2);
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut i = 0;
+    while i < WIDTH {
+        let is_filled = i < filled;
+        let (bg, fg) = if is_filled {
+            (full_color, COLORS.bg)
+        } else {
+            (track, COLORS.muted)
+        };
+        let mut run = String::new();
+        while i < WIDTH && (i < filled) == is_filled {
+            let label_pos = i as isize - label_start as isize;
+            let c = if label_pos >= 0 && (label_pos as usize) < label_len {
+                chars[label_pos as usize]
+            } else {
+                ' '
+            };
+            run.push(c);
+            i += 1;
+        }
+        spans.push(Span::styled(run, Style::default().fg(fg).bg(bg)));
+    }
+    spans
 }

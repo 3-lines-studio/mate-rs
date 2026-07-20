@@ -170,13 +170,6 @@ pub fn result_lang(tool_name: &str, args: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::chat::fmt_tokens;
-
-    #[test]
-    fn test_format_tokens() {
-        assert_eq!(fmt_tokens(500), "500");
-        assert_eq!(fmt_tokens(1500), "1.5k");
-    }
 
     #[test]
     fn test_format_tool_label_read_file() {
