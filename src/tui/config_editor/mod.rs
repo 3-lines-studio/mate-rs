@@ -2,15 +2,15 @@ mod edit;
 mod fields;
 mod rows;
 
-use crate::config::{save_config, Config};
+use crate::config::{Config, save_config};
 use crate::tui::theme::COLORS;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edit::Edit;
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::Style,
     widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
-    Frame,
 };
 use rows::Row;
 

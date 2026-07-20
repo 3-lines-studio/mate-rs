@@ -214,15 +214,13 @@ impl BotInner {
             return;
         }
 
-        if !self.allowed_users.is_empty() {
-            if let Some(ref from) = msg.from {
-                if !self.allowed_users.contains(&from.id) {
-                    let _ =
-                        tg_send_message(&self.client, &self.token, chat_id, "Access denied", None)
-                            .await;
-                    return;
-                }
-            }
+        if !self.allowed_users.is_empty()
+            && let Some(ref from) = msg.from
+            && !self.allowed_users.contains(&from.id)
+        {
+            let _ =
+                tg_send_message(&self.client, &self.token, chat_id, "Access denied", None).await;
+            return;
         }
 
         let text = match msg.text.as_deref() {

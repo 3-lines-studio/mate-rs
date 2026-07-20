@@ -1,12 +1,12 @@
 use super::textarea::textarea_cursor_xy;
-use super::{fit_height, fmt_cost, fmt_tokens, shorten_cwd_string, ChatScreen};
+use super::{ChatScreen, fit_height, fmt_cost, fmt_tokens, shorten_cwd_string};
 use crate::message::Message;
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::Style,
     text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
-    Frame,
 };
 
 use super::super::chat_dropdowns::render_dropdown;
@@ -88,21 +88,22 @@ impl ChatScreen {
                                 "",
                             ));
 
-                            if name == "delegate" && !id.is_empty() {
-                                if let Some(child_msgs) = children.get(&id) {
-                                    let delegate_seg = last.segments.last_mut().unwrap();
-                                    for child_msg in child_msgs {
-                                        if child_msg.role == crate::message::Role::Tool {
-                                            delegate_seg.children.push(Segment::tool(
-                                                &child_msg.name,
-                                                "",
-                                                &child_msg.content,
-                                                "",
-                                                &child_msg.tool_duration,
-                                                &self.cwd,
-                                                "",
-                                            ));
-                                        }
+                            if name == "delegate"
+                                && !id.is_empty()
+                                && let Some(child_msgs) = children.get(&id)
+                            {
+                                let delegate_seg = last.segments.last_mut().unwrap();
+                                for child_msg in child_msgs {
+                                    if child_msg.role == crate::message::Role::Tool {
+                                        delegate_seg.children.push(Segment::tool(
+                                            &child_msg.name,
+                                            "",
+                                            &child_msg.content,
+                                            "",
+                                            &child_msg.tool_duration,
+                                            &self.cwd,
+                                            "",
+                                        ));
                                     }
                                 }
                             }

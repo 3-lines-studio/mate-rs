@@ -11,6 +11,8 @@ use std::sync::Arc;
 pub mod bootstrap;
 pub mod local;
 pub mod resolve;
+pub mod run;
+pub use run::run_definition;
 pub mod scheduler;
 pub mod session;
 pub mod session_manager;

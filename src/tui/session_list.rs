@@ -1,12 +1,12 @@
-use crate::session::store::Store;
 use crate::session::Session;
+use crate::session::store::Store;
 use crate::tui::theme::COLORS;
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::{Color, Style},
     text::Line,
     widgets::{Block, List, ListItem, Paragraph},
-    Frame,
 };
 
 pub struct SessionListScreen {

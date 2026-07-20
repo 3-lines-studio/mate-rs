@@ -1,6 +1,6 @@
 use super::ChatScreen;
 
-use super::super::chat_dropdowns::{fuzzy_score, LabeledItem, TemplateItem, TreeItem, COMMANDS};
+use super::super::chat_dropdowns::{COMMANDS, LabeledItem, TemplateItem, TreeItem, fuzzy_score};
 
 impl ChatScreen {
     pub fn open_command_dropdown(&mut self) {

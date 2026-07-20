@@ -134,7 +134,9 @@ fn truncate_output(s: String) -> String {
     let dropped = s.len() - cut;
     let marker = format!(
         "\n... (output truncated: {} of {} bytes dropped, {} byte limit. Re-call with a smaller limit/offset to paginate.)",
-        dropped, s.len(), MAX_TOOL_OUTPUT_BYTES
+        dropped,
+        s.len(),
+        MAX_TOOL_OUTPUT_BYTES
     );
     let mut out = String::with_capacity(cut + marker.len());
     out.push_str(&s[..cut]);

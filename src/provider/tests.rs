@@ -5,31 +5,41 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
 fn test_provider_error_retryable() {
-    assert!(ProviderError {
-        status_code: 429,
-        body: "rate limit".into()
-    }
-    .retryable());
-    assert!(ProviderError {
-        status_code: 500,
-        body: "internal".into()
-    }
-    .retryable());
-    assert!(ProviderError {
-        status_code: 503,
-        body: "unavailable".into()
-    }
-    .retryable());
-    assert!(!ProviderError {
-        status_code: 400,
-        body: "bad request".into()
-    }
-    .retryable());
-    assert!(!ProviderError {
-        status_code: 404,
-        body: "not found".into()
-    }
-    .retryable());
+    assert!(
+        ProviderError {
+            status_code: 429,
+            body: "rate limit".into()
+        }
+        .retryable()
+    );
+    assert!(
+        ProviderError {
+            status_code: 500,
+            body: "internal".into()
+        }
+        .retryable()
+    );
+    assert!(
+        ProviderError {
+            status_code: 503,
+            body: "unavailable".into()
+        }
+        .retryable()
+    );
+    assert!(
+        !ProviderError {
+            status_code: 400,
+            body: "bad request".into()
+        }
+        .retryable()
+    );
+    assert!(
+        !ProviderError {
+            status_code: 404,
+            body: "not found".into()
+        }
+        .retryable()
+    );
 }
 
 #[test]
@@ -562,10 +572,10 @@ async fn test_sse_tool_call_accumulation() {
 
     let mut got_tool_call = false;
     while let Some(ev) = rx.recv().await {
-        if let StreamEvent::ToolCall { call } = &ev {
-            if call.name == "bash" {
-                got_tool_call = true;
-            }
+        if let StreamEvent::ToolCall { call } = &ev
+            && call.name == "bash"
+        {
+            got_tool_call = true;
         }
     }
     assert!(got_tool_call);
@@ -617,10 +627,11 @@ async fn test_sse_tool_call_emitted_after_done_terminator() {
 
     let mut got_tool_call = false;
     while let Some(ev) = rx.recv().await {
-        if let StreamEvent::ToolCall { call } = &ev {
-            if call.name == "bash" && call.arguments == "{\"cmd\":\"ls\"}" {
-                got_tool_call = true;
-            }
+        if let StreamEvent::ToolCall { call } = &ev
+            && call.name == "bash"
+            && call.arguments == "{\"cmd\":\"ls\"}"
+        {
+            got_tool_call = true;
         }
     }
     assert!(

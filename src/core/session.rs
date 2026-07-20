@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
-use super::session_manager::SessionManager;
 use super::Deps;
+use super::session_manager::SessionManager;
 
 struct SessionParts {
     store: Store,

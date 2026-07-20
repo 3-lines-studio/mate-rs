@@ -267,10 +267,10 @@ fn find_block_mut<'a>(blocks: &'a mut [LiveBlock], tool_id: &str) -> Option<&'a 
 }
 
 fn ensure_block<'a>(blocks: &'a mut Vec<LiveBlock>, kind: &str) -> &'a mut LiveBlock {
-    if let Some(last) = blocks.last() {
-        if last.kind == kind {
-            return blocks.last_mut().unwrap();
-        }
+    if let Some(last) = blocks.last()
+        && last.kind == kind
+    {
+        return blocks.last_mut().unwrap();
     }
     blocks.push(LiveBlock::new(kind));
     blocks.last_mut().unwrap()

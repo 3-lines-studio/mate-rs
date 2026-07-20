@@ -224,7 +224,7 @@ impl App {
                         KeyCode::Char('y') => {
                             if let AppState::Confirm(ref k) = self.state {
                                 match k {
-                                    ConfirmKind::DeleteSession(ref sess) => {
+                                    ConfirmKind::DeleteSession(sess) => {
                                         let sid = sess.id.clone();
                                         let _ = self.deps.store.delete(&sid);
                                         self.session_list.load(&mut self.deps.store);
@@ -285,10 +285,10 @@ impl App {
                                 if let Ok(sess) = self.deps.store.create() {
                                     self.switch_to_session(sess);
                                 }
-                            } else if let Some(sess) = self.session_list.selected_session() {
-                                if let Ok(sess) = self.deps.store.load(&sess.id.clone()) {
-                                    self.switch_to_session(sess);
-                                }
+                            } else if let Some(sess) = self.session_list.selected_session()
+                                && let Ok(sess) = self.deps.store.load(&sess.id.clone())
+                            {
+                                self.switch_to_session(sess);
                             }
                         }
                         KeyCode::Char('d') => {
@@ -387,21 +387,21 @@ impl App {
                                 self.chat.open_file_dropdown("");
                             }
                             (true, false, KeyCode::Char('r')) => {
-                                if self.chat.retry_available {
-                                    if let Some(ref asession) = self.chat.active_session {
-                                        match asession.retry() {
-                                            Ok(events) => {
-                                                self.chat.events = Some(events);
-                                                self.chat.waiting = true;
-                                                self.chat.wait_start = Instant::now();
-                                                self.chat.wait_ticks = 0;
-                                                self.chat.retry_available = false;
-                                                self.chat.user_scrolled_up = false;
-                                                self.chat.scroll_to_bottom();
-                                            }
-                                            Err(e) => {
-                                                self.chat.add_message("error", &e);
-                                            }
+                                if self.chat.retry_available
+                                    && let Some(ref asession) = self.chat.active_session
+                                {
+                                    match asession.retry() {
+                                        Ok(events) => {
+                                            self.chat.events = Some(events);
+                                            self.chat.waiting = true;
+                                            self.chat.wait_start = Instant::now();
+                                            self.chat.wait_ticks = 0;
+                                            self.chat.retry_available = false;
+                                            self.chat.user_scrolled_up = false;
+                                            self.chat.scroll_to_bottom();
+                                        }
+                                        Err(e) => {
+                                            self.chat.add_message("error", &e);
                                         }
                                     }
                                 }
@@ -574,11 +574,11 @@ impl App {
         }
         self.chat.events = None;
         self.chat.finish_bot_message_now();
-        if let Some(last) = self.chat.messages.last_mut() {
-            if last.role == "assistant" {
-                last.stopped = true;
-                last.rendered.clear();
-            }
+        if let Some(last) = self.chat.messages.last_mut()
+            && last.role == "assistant"
+        {
+            last.stopped = true;
+            last.rendered.clear();
         }
         self.chat.waiting = false;
         self.chat.compacting = false;
@@ -667,34 +667,35 @@ impl App {
         let asession = self.deps.new_session(sess.clone());
         self.chat.reset();
 
-        if !sess.current_turn.is_empty() {
-            if let Ok(turns) = self.deps.store.ancestry(&sess.id, &sess.current_turn) {
-                let ancestry_ids: std::collections::HashSet<String> =
-                    turns.iter().map(|t| t.id.clone()).collect();
+        if !sess.current_turn.is_empty()
+            && let Ok(turns) = self.deps.store.ancestry(&sess.id, &sess.current_turn)
+        {
+            let ancestry_ids: std::collections::HashSet<String> =
+                turns.iter().map(|t| t.id.clone()).collect();
 
-                let mut msgs = Vec::new();
-                let mut children: std::collections::HashMap<String, Vec<Message>> =
-                    std::collections::HashMap::new();
+            let mut msgs = Vec::new();
+            let mut children: std::collections::HashMap<String, Vec<Message>> =
+                std::collections::HashMap::new();
 
-                for t in &turns {
-                    msgs.extend_from_slice(&t.messages);
-                }
+            for t in &turns {
+                msgs.extend_from_slice(&t.messages);
+            }
 
-                if let Ok(index) = self.deps.store.turn_index(&sess.id) {
-                    for m in &index {
-                        if !m.tool_call_id.is_empty() && ancestry_ids.contains(&m.parent_id) {
-                            if let Ok(sub_turn) = self.deps.store.load_turn(&sess.id, &m.id) {
-                                children
-                                    .entry(m.tool_call_id.clone())
-                                    .or_default()
-                                    .extend(sub_turn.messages);
-                            }
-                        }
+            if let Ok(index) = self.deps.store.turn_index(&sess.id) {
+                for m in &index {
+                    if !m.tool_call_id.is_empty()
+                        && ancestry_ids.contains(&m.parent_id)
+                        && let Ok(sub_turn) = self.deps.store.load_turn(&sess.id, &m.id)
+                    {
+                        children
+                            .entry(m.tool_call_id.clone())
+                            .or_default()
+                            .extend(sub_turn.messages);
                     }
                 }
-
-                self.chat.load_messages(&msgs, &children);
             }
+
+            self.chat.load_messages(&msgs, &children);
         }
 
         self.chat.active_session = Some(asession);

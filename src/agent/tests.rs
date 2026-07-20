@@ -2,13 +2,13 @@ use super::*;
 use crate::provider::{
     ChatClient, ChatRequest, Client, ModelProfile, ProviderError, StreamEvent, StreamToolCall,
 };
-use crate::session::store::Store;
 use crate::session::Session;
+use crate::session::store::Store;
 use crate::tools::Registry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::mpsc;
 
 fn se(event_type: &str, delta: &str) -> StreamEvent {
     match event_type {
@@ -216,10 +216,10 @@ async fn test_delegate_end_to_end() {
     let mut delegate_result = String::new();
     let mut final_text = String::new();
     while let Some(ev) = rx.recv().await {
-        if let EventKind::ToolResult { name, result, .. } = &ev.kind {
-            if name == "delegate" {
-                delegate_result = result.clone();
-            }
+        if let EventKind::ToolResult { name, result, .. } = &ev.kind
+            && name == "delegate"
+        {
+            delegate_result = result.clone();
         }
         if let EventKind::TextDelta(delta) = &ev.kind {
             final_text.push_str(delta);
@@ -305,10 +305,10 @@ async fn test_delegate_subagent_with_tool_round() {
     let mut delegate_result = String::new();
     let mut final_text = String::new();
     while let Some(ev) = rx.recv().await {
-        if let EventKind::ToolResult { name, result, .. } = &ev.kind {
-            if name == "delegate" {
-                delegate_result = result.clone();
-            }
+        if let EventKind::ToolResult { name, result, .. } = &ev.kind
+            && name == "delegate"
+        {
+            delegate_result = result.clone();
         }
         if let EventKind::TextDelta(delta) = &ev.kind {
             final_text.push_str(delta);

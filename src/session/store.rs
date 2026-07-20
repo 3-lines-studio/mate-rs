@@ -3,7 +3,7 @@ use crate::message::Message;
 use crate::session::cache::Cache;
 #[cfg(test)]
 use crate::session::types::compute_turn_id;
-use crate::session::types::{turn_label, Session, Turn, TurnMeta};
+use crate::session::types::{Session, Turn, TurnMeta, turn_label};
 use chrono::Utc;
 use rand::RngExt;
 use std::collections::HashMap;
@@ -302,14 +302,14 @@ fn atomic_write(
 }
 
 fn expand_tilde(path: &str) -> String {
-    if let Some(stripped) = path.strip_prefix('~') {
-        if let Ok(home) = std::env::var("HOME") {
-            let mut p = PathBuf::from(home);
-            if !stripped.is_empty() {
-                p.push(&stripped[1..]);
-            }
-            return p.to_string_lossy().to_string();
+    if let Some(stripped) = path.strip_prefix('~')
+        && let Ok(home) = std::env::var("HOME")
+    {
+        let mut p = PathBuf::from(home);
+        if !stripped.is_empty() {
+            p.push(&stripped[1..]);
         }
+        return p.to_string_lossy().to_string();
     }
     path.to_string()
 }

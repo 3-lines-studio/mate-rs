@@ -136,11 +136,7 @@ pub fn parse_gitignore(root: &str) -> GitignoreMatcher {
                 String::new()
             } else if let Ok(stripped) = rel_dir.strip_prefix(&root) {
                 let s = stripped.to_string_lossy().to_string();
-                if s == "." {
-                    String::new()
-                } else {
-                    s
-                }
+                if s == "." { String::new() } else { s }
             } else {
                 String::new()
             };
@@ -251,10 +247,10 @@ impl GitignoreMatcher {
                 rel_path.to_string()
             };
 
-            if let Some(g) = &rule.glob {
-                if g.compile_matcher().is_match(&target) {
-                    ignored = !rule.negate;
-                }
+            if let Some(g) = &rule.glob
+                && g.compile_matcher().is_match(&target)
+            {
+                ignored = !rule.negate;
             }
         }
         ignored

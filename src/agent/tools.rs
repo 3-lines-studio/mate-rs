@@ -6,8 +6,8 @@ use crate::session::store::Store;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::mpsc;
 
 const DELEGATE_TOOL_NAME: &str = "delegate";
 
@@ -232,7 +232,7 @@ fn run_delegate(
                         subagent_id: String::new(),
                         tool_call_id: tc.id.clone(),
                     },
-                )
+                );
             }
         };
 
@@ -249,7 +249,7 @@ fn run_delegate(
                         subagent_id: String::new(),
                         tool_call_id: tc.id.clone(),
                     },
-                )
+                );
             }
         };
 
@@ -361,11 +361,11 @@ pub(super) fn build_delegate_def(
             desc.push_str(" | ");
         }
         desc.push_str(name);
-        if let Some(d) = descriptions.get(name) {
-            if !d.is_empty() {
-                desc.push_str(": ");
-                desc.push_str(d);
-            }
+        if let Some(d) = descriptions.get(name)
+            && !d.is_empty()
+        {
+            desc.push_str(": ");
+            desc.push_str(d);
         }
     }
 

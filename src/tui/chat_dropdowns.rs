@@ -1,11 +1,11 @@
 use crate::prompts::Template;
 use crate::tui::theme::COLORS;
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::Style,
     text::Line,
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 
 pub fn fuzzy_score(query: &str, hay: &str) -> Option<i64> {

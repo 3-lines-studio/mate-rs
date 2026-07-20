@@ -17,12 +17,12 @@ pub fn strip_ansi(s: &str) -> String {
     let mut in_escape = false;
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            if let Some(&'[') = chars.peek() {
-                chars.next();
-                in_escape = true;
-                continue;
-            }
+        if c == '\x1b'
+            && let Some(&'[') = chars.peek()
+        {
+            chars.next();
+            in_escape = true;
+            continue;
         }
         if in_escape {
             if c == 'm' {

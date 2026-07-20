@@ -6,8 +6,8 @@
 
 //! Rendering algorithm.
 
-use std::io::prelude::*;
 use std::io::Result;
+use std::io::prelude::*;
 
 use anstyle::{Effects, Style};
 use pulldown_cmark::Event::*;
@@ -1341,7 +1341,9 @@ pub fn write_event<'a, W: Write>(
                 }
                 (None, Some(url)) => {
                     if let InlineLink = state {
-                        log::warn!("Terminal does not support images, want to render image as link but cannot: Already inside a link ({url})");
+                        log::warn!(
+                            "Terminal does not support images, want to render image as link but cannot: Already inside a link ({url})"
+                        );
                         None
                     } else {
                         log::info!(

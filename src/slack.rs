@@ -105,10 +105,10 @@ async fn post_message(
     thread_ts: Option<&str>,
 ) -> Result<String, String> {
     let mut body = serde_json::json!({"channel": channel, "text": text});
-    if let Some(ts) = thread_ts {
-        if !ts.is_empty() {
-            body["thread_ts"] = serde_json::Value::String(ts.to_string());
-        }
+    if let Some(ts) = thread_ts
+        && !ts.is_empty()
+    {
+        body["thread_ts"] = serde_json::Value::String(ts.to_string());
     }
     let resp: PostMessageResp = client
         .post(api_url("chat.postMessage"))
@@ -355,13 +355,13 @@ impl BotInner {
                             let ack = serde_json::json!({"envelope_id": eid}).to_string();
                             let _ = ws.send(Message::Text(ack.into())).await;
                         }
-                        if let Some(payload) = env.payload {
-                            if let Some(event) = parse_event(&payload, &self.bot_user_id) {
-                                let bot = self.clone();
-                                tokio::spawn(async move {
-                                    bot.handle_event(event).await;
-                                });
-                            }
+                        if let Some(payload) = env.payload
+                            && let Some(event) = parse_event(&payload, &self.bot_user_id)
+                        {
+                            let bot = self.clone();
+                            tokio::spawn(async move {
+                                bot.handle_event(event).await;
+                            });
                         }
                     }
                     "disconnect" => {

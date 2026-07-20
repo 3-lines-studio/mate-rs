@@ -82,10 +82,10 @@ fn merge_tool_call_deltas(
             name: String::new(),
             arguments: String::new(),
         });
-        if let Some(ref id) = tc.id {
-            if !id.is_empty() {
-                entry.id = id.clone();
-            }
+        if let Some(ref id) = tc.id
+            && !id.is_empty()
+        {
+            entry.id = id.clone();
         }
         if let Some(ref func) = tc.function {
             if let Some(ref name) = func.name {
@@ -250,20 +250,20 @@ pub(crate) async fn read_stream(
 
             if let Some(usage) = &chunk.usage {
                 let mut usage = usage.clone();
-                if let Some(ref details) = usage.prompt_tokens_details {
-                    if usage.prompt_cache_hit_tokens == 0 {
-                        usage.prompt_cache_hit_tokens = details.cached_tokens;
-                    }
+                if let Some(ref details) = usage.prompt_tokens_details
+                    && usage.prompt_cache_hit_tokens == 0
+                {
+                    usage.prompt_cache_hit_tokens = details.cached_tokens;
                 }
                 let _ = tx.send(StreamEvent::Usage { usage }).await;
             }
 
             if let Some(choices) = &chunk.choices {
                 for choice in choices {
-                    if let Some(fr) = &choice.finish_reason {
-                        if !fr.is_empty() {
-                            finish_reason = fr.clone();
-                        }
+                    if let Some(fr) = &choice.finish_reason
+                        && !fr.is_empty()
+                    {
+                        finish_reason = fr.clone();
                     }
 
                     if let Some(delta) = &choice.delta {
@@ -288,23 +288,23 @@ pub(crate) async fn read_stream(
                                         })
                                         .await;
                                 }
-                            } else if let Some(ref rc) = delta.reasoning_content {
-                                if !rc.is_empty() {
-                                    let _ = tx
-                                        .send(StreamEvent::ReasoningDelta { delta: rc.clone() })
-                                        .await;
-                                }
+                            } else if let Some(ref rc) = delta.reasoning_content
+                                && !rc.is_empty()
+                            {
+                                let _ = tx
+                                    .send(StreamEvent::ReasoningDelta { delta: rc.clone() })
+                                    .await;
                             }
                         }
 
-                        if let Some(ref content) = delta.content {
-                            if !content.is_empty() {
-                                let _ = tx
-                                    .send(StreamEvent::TextDelta {
-                                        delta: content.clone(),
-                                    })
-                                    .await;
-                            }
+                        if let Some(ref content) = delta.content
+                            && !content.is_empty()
+                        {
+                            let _ = tx
+                                .send(StreamEvent::TextDelta {
+                                    delta: content.clone(),
+                                })
+                                .await;
                         }
 
                         if let Some(tc_list) = &delta.tool_calls {

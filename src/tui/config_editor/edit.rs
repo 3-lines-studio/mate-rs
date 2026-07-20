@@ -3,13 +3,13 @@ use crate::tui::chat_dropdowns::Dropdown;
 use crate::tui::theme::COLORS;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::Style,
     widgets::{Block, BorderType, Borders, Clear, List, ListItem},
-    Frame,
 };
 
-use super::fields::{unicode_display_width, FieldKind, SECTION_NAMES};
+use super::fields::{FieldKind, SECTION_NAMES, unicode_display_width};
 use super::rows::Row;
 
 pub(super) enum Edit {
@@ -101,7 +101,7 @@ impl super::ConfigScreen {
     }
 
     pub(super) fn handle_text_key(&mut self, key: KeyEvent) -> Option<bool> {
-        if let Edit::Text(ref buf, ref cursor) = &self.edit {
+        if let Edit::Text(buf, cursor) = &self.edit {
             let mut buf = buf.clone();
             let mut cursor = *cursor;
             match key.code {
@@ -154,7 +154,7 @@ impl super::ConfigScreen {
     }
 
     pub(super) fn handle_pick_key(&mut self, key: KeyEvent) -> Option<bool> {
-        if let Edit::Pick(ref dd) = &self.edit {
+        if let Edit::Pick(dd) = &self.edit {
             let mut dd = dd.clone();
             match key.code {
                 KeyCode::Esc => {
@@ -372,10 +372,10 @@ impl super::ConfigScreen {
                     } else {
                         self.get_scalar_field_value(*si, name)
                     };
-                    if let Some(buf) = edit_buf {
-                        if i == self.row {
-                            value = buf.to_string();
-                        }
+                    if let Some(buf) = edit_buf
+                        && i == self.row
+                    {
+                        value = buf.to_string();
                     }
                     let text = if value.is_empty() {
                         format!("{}{}", indent, name)

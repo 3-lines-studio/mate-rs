@@ -1,12 +1,12 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
-    Frame,
 };
 
-use super::chat_format::{format_tool_label, result_lang, TOOL_COLOR};
+use super::chat_format::{TOOL_COLOR, format_tool_label, result_lang};
 use crate::render::highlight;
 use crate::tui::theme::COLORS;
 

@@ -1,5 +1,5 @@
-use crate::tools::define_tool;
 use crate::tools::Tool;
+use crate::tools::define_tool;
 use futures_util::StreamExt;
 use htmd::HtmlToMarkdown;
 use serde::Deserialize;
@@ -69,16 +69,14 @@ async fn execute_webfetch(mut p: WebFetchParams) -> Result<String, String> {
         .map(|l| l.contains("text/html"))
         .unwrap_or(false);
 
-    if is_html {
-        if let Some((header, body)) = result.split_once("\n\n") {
-            match HtmlToMarkdown::builder()
-                .skip_tags(vec!["script", "style"])
-                .build()
-                .convert(body)
-            {
-                Ok(md) => return Ok(format!("{}\n\n{}", header, md)),
-                Err(_) => return Ok(result),
-            }
+    if is_html && let Some((header, body)) = result.split_once("\n\n") {
+        match HtmlToMarkdown::builder()
+            .skip_tags(vec!["script", "style"])
+            .build()
+            .convert(body)
+        {
+            Ok(md) => return Ok(format!("{}\n\n{}", header, md)),
+            Err(_) => return Ok(result),
         }
     }
 
@@ -132,15 +130,15 @@ async fn check_public_host(host: &str) -> Result<(), String> {
     // Check DNS cache
     {
         let cache = DNS_CACHE.read().unwrap();
-        if let Some(entry) = cache.get(host) {
-            if Instant::now() < entry.expires {
-                for ip in &entry.addrs {
-                    if is_private_addr(ip) {
-                        return Err(format!("blocked: {} resolves to private IP {}", host, ip));
-                    }
+        if let Some(entry) = cache.get(host)
+            && Instant::now() < entry.expires
+        {
+            for ip in &entry.addrs {
+                if is_private_addr(ip) {
+                    return Err(format!("blocked: {} resolves to private IP {}", host, ip));
                 }
-                return Ok(());
             }
+            return Ok(());
         }
     }
 
@@ -217,10 +215,10 @@ async fn fetch_http(url: &str, max_size: i32) -> Result<String, String> {
             }
             let new_url = attempt.url().clone();
             let new_host = new_url.host_str().unwrap_or("");
-            if let Some(first) = attempt.previous().first() {
-                if first.host_str() == Some(new_host) {
-                    return attempt.follow();
-                }
+            if let Some(first) = attempt.previous().first()
+                && first.host_str() == Some(new_host)
+            {
+                return attempt.follow();
             }
             let port = new_url.port_or_known_default().unwrap_or(80);
             let addr_str = format!("{}:{}", new_host, port);
@@ -417,9 +415,11 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url_http() {
         let mut max_size = 1000;
-        assert!(validate_and_clamp_url("http://example.com", &mut max_size)
-            .await
-            .is_ok());
+        assert!(
+            validate_and_clamp_url("http://example.com", &mut max_size)
+                .await
+                .is_ok()
+        );
     }
 
     #[test]
@@ -433,35 +433,43 @@ mod tests {
     #[tokio::test]
     async fn test_validate_url_ftp_not_allowed() {
         let mut max_size = 100;
-        assert!(validate_and_clamp_url("ftp://files.com", &mut max_size)
-            .await
-            .is_err());
+        assert!(
+            validate_and_clamp_url("ftp://files.com", &mut max_size)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn test_validate_url_default_max_size() {
         let mut max_size = 0;
-        assert!(validate_and_clamp_url("https://x.com", &mut max_size)
-            .await
-            .is_ok());
+        assert!(
+            validate_and_clamp_url("https://x.com", &mut max_size)
+                .await
+                .is_ok()
+        );
         assert_eq!(max_size, 100000);
     }
 
     #[tokio::test]
     async fn test_validate_url_negative_max_size() {
         let mut max_size = -5;
-        assert!(validate_and_clamp_url("https://x.com", &mut max_size)
-            .await
-            .is_ok());
+        assert!(
+            validate_and_clamp_url("https://x.com", &mut max_size)
+                .await
+                .is_ok()
+        );
         assert_eq!(max_size, 100000);
     }
 
     #[tokio::test]
     async fn test_validate_url_clamped() {
         let mut max_size = 999999;
-        assert!(validate_and_clamp_url("https://x.com", &mut max_size)
-            .await
-            .is_ok());
+        assert!(
+            validate_and_clamp_url("https://x.com", &mut max_size)
+                .await
+                .is_ok()
+        );
         assert_eq!(max_size, 200000);
     }
 

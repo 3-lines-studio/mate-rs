@@ -1,6 +1,6 @@
+use crate::tools::Tool;
 use crate::tools::define_tool;
 use crate::tools::gitignore::{parse_gitignore, walk_files};
-use crate::tools::Tool;
 use regex::Regex;
 use serde::Deserialize;
 use std::io::BufRead;
@@ -111,10 +111,10 @@ fn execute_grep(mut p: GrepParams) -> Result<String, String> {
         if remaining == 0 {
             return false;
         }
-        if let Ok(m) = grep_file(full_path, &*matcher, remaining as i32) {
-            if !m.is_empty() {
-                results.push(m);
-            }
+        if let Ok(m) = grep_file(full_path, &*matcher, remaining as i32)
+            && !m.is_empty()
+        {
+            results.push(m);
         }
         results.len() < max
     });

@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
@@ -279,11 +279,7 @@ fn parse_field(field: &str, lo: u32, hi: u32) -> Result<Vec<u32>, String> {
             let v: u32 = range_part
                 .parse()
                 .map_err(|_| format!("bad value in {}", term))?;
-            if step != 1 {
-                (v, hi)
-            } else {
-                (v, v)
-            }
+            if step != 1 { (v, hi) } else { (v, v) }
         };
         if start > end {
             return Err(format!("descending range in {}", term));

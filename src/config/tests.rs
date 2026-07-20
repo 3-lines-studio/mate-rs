@@ -64,11 +64,11 @@ fn test_dir_for_custom_name() {
 
 #[test]
 fn test_dir_for_different_names_isolate() {
-    std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg");
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg") };
     let a = dir_for("agent-a");
     let b = dir_for("agent-b");
     assert_ne!(a, b);
-    std::env::remove_var("XDG_CONFIG_HOME");
+    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 }
 
 #[test]
@@ -328,12 +328,14 @@ api_key = "svc-key"
 
     let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
     let picsel = cfg.services.get("picsel").unwrap();
-    assert!(picsel
-        .get("connection_string")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .contains("postgres://"));
+    assert!(
+        picsel
+            .get("connection_string")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("postgres://")
+    );
 }
 
 #[test]

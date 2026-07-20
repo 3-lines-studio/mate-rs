@@ -51,14 +51,14 @@ pub fn print_event(ev: &Event, print_tools: bool) -> StdioEvent {
 
 use crate::message::{Message, ToolDef};
 use crate::provider::ChatClient;
-use crate::session::store::Store;
 use crate::session::Session;
+use crate::session::store::Store;
 use crate::tools::Registry;
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::mpsc;
 
 const TOOL_TIMEOUT_SECS: u64 = 120;
 const COMPACTION_THRESHOLD_NUM: i32 = 7;

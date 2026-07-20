@@ -1,6 +1,6 @@
+use crate::tools::Tool;
 use crate::tools::define_tool;
 use crate::tools::gitignore::{parse_gitignore, walk_files};
-use crate::tools::Tool;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

@@ -6,10 +6,10 @@ mod textarea;
 use crate::agent::{AgentSession, Event};
 use crate::prompts::Template;
 use crate::render::StreamRenderer;
-use ratatui::{layout::Rect, Frame};
+use ratatui::{Frame, layout::Rect};
 use std::time::{Duration, Instant};
 
-use super::chat_handlers::{finish_bot_message, handle_agent_event, ChatMsg, LiveBlock, Segment};
+use super::chat_handlers::{ChatMsg, LiveBlock, Segment, finish_bot_message, handle_agent_event};
 use super::file_picker::index_files;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -259,7 +259,7 @@ pub(crate) fn shorten_cwd_string(cwd: &str) -> String {
     if let Some(home) = std::env::var_os("HOME") {
         let home = home.to_string_lossy();
         if cwd.starts_with(&*home) {
-            return format!("~/{}", &cwd[home.len()..]);
+            return format!("~{}", &cwd[home.len()..]);
         }
     }
     cwd.to_string()
@@ -300,7 +300,7 @@ pub(super) fn fit_height(area: Rect, top: u16, h: u16) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::{Terminal, backend::TestBackend};
 
     fn render_to(screen: &mut ChatScreen, w: u16, h: u16) {
         let backend = TestBackend::new(w, h);

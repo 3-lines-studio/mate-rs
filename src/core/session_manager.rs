@@ -34,13 +34,13 @@ impl SessionManager {
         }
 
         let session_id = self.key_store.get(key).cloned();
-        if let Some(ref session_id) = session_id {
-            if let Ok(loaded_sess) = self.store.load(session_id) {
-                let sess = (self.factory)(loaded_sess);
-                let sess = Arc::new(std::sync::Mutex::new(sess));
-                self.cache.put(key, sess.clone());
-                return Ok(sess);
-            }
+        if let Some(ref session_id) = session_id
+            && let Ok(loaded_sess) = self.store.load(session_id)
+        {
+            let sess = (self.factory)(loaded_sess);
+            let sess = Arc::new(std::sync::Mutex::new(sess));
+            self.cache.put(key, sess.clone());
+            return Ok(sess);
         }
 
         let stored = self.store.create()?;

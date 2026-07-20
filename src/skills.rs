@@ -1,4 +1,4 @@
-use crate::tools::{define_tool, Tool};
+use crate::tools::{Tool, define_tool};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -129,12 +129,11 @@ pub fn load_skill_dirs(
         format!("{}/.mate/skills", cwd),
         format!("{}/skills", cfg_dir),
     ] {
-        if let Err(e) = store.load_dir(dir) {
-            if e.downcast_ref::<std::io::Error>()
+        if let Err(e) = store.load_dir(dir)
+            && e.downcast_ref::<std::io::Error>()
                 .is_none_or(|ioe| ioe.kind() != std::io::ErrorKind::NotFound)
-            {
-                log::warn!("loading skills dir {}: {}", dir, e);
-            }
+        {
+            log::warn!("loading skills dir {}: {}", dir, e);
         }
     }
     Ok(store)

@@ -19,7 +19,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use mate::render::{block::ansi_to_text, StreamRenderer};
+use mate::render::{StreamRenderer, block::ansi_to_text};
 
 const SAMPLE: &str = include_str!("mdcat_sample.md");
 
@@ -69,26 +69,26 @@ fn main() -> io::Result<()> {
             );
         })?;
 
-        if event::poll(std::time::Duration::from_millis(120))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                if should_quit(&key) {
-                    break;
-                }
-                let visible = terminal.size()?.height.saturating_sub(2);
-                match key.code {
-                    KeyCode::Down | KeyCode::Char('j') => scroll = scroll.saturating_add(1),
-                    KeyCode::Up | KeyCode::Char('k') => scroll = scroll.saturating_sub(1),
-                    KeyCode::PageDown => scroll = scroll.saturating_add(visible),
-                    KeyCode::PageUp => scroll = scroll.saturating_sub(visible),
-                    KeyCode::Char('g') => scroll = 0,
-                    KeyCode::Char('G') => scroll = u16::MAX,
-                    KeyCode::Home => scroll = 0,
-                    KeyCode::End => scroll = u16::MAX,
-                    _ => {}
-                }
+        if event::poll(std::time::Duration::from_millis(120))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            if should_quit(&key) {
+                break;
+            }
+            let visible = terminal.size()?.height.saturating_sub(2);
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => scroll = scroll.saturating_add(1),
+                KeyCode::Up | KeyCode::Char('k') => scroll = scroll.saturating_sub(1),
+                KeyCode::PageDown => scroll = scroll.saturating_add(visible),
+                KeyCode::PageUp => scroll = scroll.saturating_sub(visible),
+                KeyCode::Char('g') => scroll = 0,
+                KeyCode::Char('G') => scroll = u16::MAX,
+                KeyCode::Home => scroll = 0,
+                KeyCode::End => scroll = u16::MAX,
+                _ => {}
             }
         }
     }

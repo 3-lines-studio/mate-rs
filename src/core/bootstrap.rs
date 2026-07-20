@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::resolve::{resolve_client, resolve_subagents};
 use super::Deps;
+use super::resolve::{resolve_client, resolve_subagents};
 
 pub fn init_with_config(
     cfg: Config,
@@ -105,6 +105,14 @@ pub fn init(
     verbose: bool,
     config_dir: &str,
 ) -> Result<Deps, Box<dyn std::error::Error + Send + Sync>> {
+    let level = if verbose { "debug" } else { "info" };
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(level),
+    )
+    .format_timestamp_secs()
+    .try_init()
+    .ok();
+
     let cfg_dir = if config_dir.is_empty() {
         crate::config::dir()
     } else {

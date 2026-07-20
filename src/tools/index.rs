@@ -1,6 +1,6 @@
+use crate::tools::Tool;
 use crate::tools::define_tool;
 use crate::tools::gitignore::{parse_gitignore, walk_files};
-use crate::tools::Tool;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -188,10 +188,10 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
 
     let mut to_process: Vec<String> = Vec::new();
     walk_files(root, &ig, &[], &mut |_full_path, rel| {
-        if let Some(ext) = extract_extension(rel) {
-            if SUPPORTED_EXTS.contains(&ext) {
-                to_process.push(rel.to_string());
-            }
+        if let Some(ext) = extract_extension(rel)
+            && SUPPORTED_EXTS.contains(&ext)
+        {
+            to_process.push(rel.to_string());
         }
         true
     });
@@ -204,20 +204,19 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
         let abs_path = root.join(rel);
         let current_mtime = get_mtime(&abs_path).unwrap_or(0.0);
 
-        if !force {
-            if let Some(&stored_mtime) = index.files.get(rel) {
-                if stored_mtime >= current_mtime {
-                    new_files.insert(rel.clone(), stored_mtime);
-                    let kept: Vec<IndexDef> = index
-                        .defs
-                        .iter()
-                        .filter(|d| &d.file == rel)
-                        .cloned()
-                        .collect();
-                    new_defs.extend(kept);
-                    continue;
-                }
-            }
+        if !force
+            && let Some(&stored_mtime) = index.files.get(rel)
+            && stored_mtime >= current_mtime
+        {
+            new_files.insert(rel.clone(), stored_mtime);
+            let kept: Vec<IndexDef> = index
+                .defs
+                .iter()
+                .filter(|d| &d.file == rel)
+                .cloned()
+                .collect();
+            new_defs.extend(kept);
+            continue;
         }
 
         let defs = process_file(root, rel, current_mtime)?;
@@ -491,15 +490,14 @@ fn walk_tree_for_refs(
         return;
     }
 
-    if REF_NODE_TYPES.contains(&node.kind()) {
-        if let Ok(text) = node.utf8_text(source) {
-            if text == target {
-                let line = node.start_position().row + 1;
-                results.push(format!("{}:{}", file, line));
-                if results.len() >= max {
-                    return;
-                }
-            }
+    if REF_NODE_TYPES.contains(&node.kind())
+        && let Ok(text) = node.utf8_text(source)
+        && text == target
+    {
+        let line = node.start_position().row + 1;
+        results.push(format!("{}:{}", file, line));
+        if results.len() >= max {
+            return;
         }
     }
 
@@ -519,7 +517,7 @@ mod tests {
 
     fn setup_dir() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().unwrap();
-        std::env::set_var("XDG_CONFIG_HOME", dir.path().join("xdg"));
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path().join("xdg")) };
         dir
     }
 

@@ -1,5 +1,5 @@
-use crate::tools::define_tool;
 use crate::tools::Tool;
+use crate::tools::define_tool;
 use serde::Deserialize;
 use std::process::Stdio;
 
@@ -35,9 +35,7 @@ pub fn tool() -> Tool {
         "bash",
         "Execute a shell command in the current working directory. Returns combined stdout and stderr. Output is truncated to last max_lines lines (default: 500).",
         params,
-        |p: BashParams| async move {
-            execute_bash(p).await
-        },
+        |p: BashParams| async move { execute_bash(p).await },
     )
 }
 
@@ -103,16 +101,16 @@ async fn execute_bash(p: BashParams) -> Result<String, String> {
     .await;
 
     #[cfg(unix)]
-    if let Some(pid) = pid {
+    if let Some(pid) = pid
+        && child.try_wait().map_or(true, |s| s.is_none())
+    {
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGTERM);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         if child.try_wait().map_or(true, |s| s.is_none()) {
             unsafe {
-                libc::kill(-(pid as i32), libc::SIGTERM);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            if child.try_wait().map_or(true, |s| s.is_none()) {
-                unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
-                }
+                libc::kill(-(pid as i32), libc::SIGKILL);
             }
         }
     }
