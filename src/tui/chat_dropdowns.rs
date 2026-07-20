@@ -48,6 +48,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("Back to Sessions", "back"),
     ("Turn Tree", "tree"),
     ("Toggle Tool Results", "tools"),
+    ("Toggle Subagent Calls", "subagents"),
     ("Toggle Thinking", "thinking"),
     ("Switch Model", "model"),
     ("Compact", "compact"),

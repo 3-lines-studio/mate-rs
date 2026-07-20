@@ -258,11 +258,11 @@ impl ChatScreen {
                         0,
                         0,
                     );
-                    if !seg.children.is_empty() {
+                    if self.show_subagent_calls && !seg.children.is_empty() {
                         if collapsed {
-                            let n = seg.children.len();
-                            let unit = if n == 1 { "call" } else { "calls" };
-                            out.push_str(&format!(" ({} {})", n, unit));
+                            let names: Vec<&str> =
+                                seg.children.iter().map(|c| c.tool_name.as_str()).collect();
+                            out.push_str(&tool_children_summary(&names));
                         } else {
                             for child in &seg.children {
                                 out.push('\n');
@@ -338,11 +338,11 @@ impl ChatScreen {
                         0,
                         self.wait_ticks,
                     );
-                    if !lb.children.is_empty() {
+                    if self.show_subagent_calls && !lb.children.is_empty() {
                         if collapsed {
-                            let n = lb.children.len();
-                            let unit = if n == 1 { "call" } else { "calls" };
-                            out.push_str(&format!(" ({} {})", n, unit));
+                            let names: Vec<&str> =
+                                lb.children.iter().map(|c| c.tool_name.as_str()).collect();
+                            out.push_str(&tool_children_summary(&names));
                         } else {
                             for child in &lb.children {
                                 out.push('\n');
@@ -371,6 +371,13 @@ impl ChatScreen {
             }
         }
         parts.join("\n\n")
+    }
+
+    pub fn rerender_all(&mut self) {
+        for msg in &mut self.messages {
+            msg.rendered.clear();
+        }
+        self.render_messages();
     }
 
     pub fn render_messages(&mut self) {
@@ -713,4 +720,39 @@ fn bar_with_text(fraction: f64, label: &str, full_color: Color) -> Vec<Span<'sta
         spans.push(Span::styled(run, Style::default().fg(fg).bg(bg)));
     }
     spans
+}
+
+fn tool_children_summary(names: &[&str]) -> String {
+    let n = names.len();
+    let unit = if n == 1 { "call" } else { "calls" };
+    let mut seen: Vec<&str> = Vec::new();
+    for nm in names {
+        if !seen.contains(nm) {
+            seen.push(nm);
+        }
+    }
+    format!(" ({} {}: {})", n, unit, seen.join(", "))
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::tool_children_summary;
+
+    #[test]
+    fn summary_lists_distinct_tool_names_with_count() {
+        let s = tool_children_summary(&["bash", "read_file", "bash"]);
+        assert_eq!(s, " (3 calls: bash, read_file)");
+    }
+
+    #[test]
+    fn summary_single_call() {
+        let s = tool_children_summary(&["grep"]);
+        assert_eq!(s, " (1 call: grep)");
+    }
+
+    #[test]
+    fn summary_empty() {
+        let s: &[&str] = &[];
+        assert_eq!(tool_children_summary(s), " (0 calls: )");
+    }
 }

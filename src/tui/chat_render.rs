@@ -116,7 +116,6 @@ pub fn render_tool_block(
     }
 
     if !result.is_empty() {
-        out.push('\n');
         let lang = result_lang(name, args);
         let rendered = if name == "grep" {
             format_grep_result(result, width, indent)
@@ -136,23 +135,48 @@ pub fn render_tool_block(
 
         let lines: Vec<&str> = rendered.lines().collect();
         let max_lines = 50;
-        let display_lines: Vec<String> = if lines.len() > max_lines {
-            let trunc_msg = format!("... (truncated, {} more lines)", lines.len() - max_lines);
-            let mut truncated: Vec<String> =
-                lines[..max_lines].iter().map(|s| s.to_string()).collect();
-            truncated.push(trunc_msg);
-            truncated
+        let (content_lines, trunc_msg): (Vec<&str>, Option<String>) = if lines.len() > max_lines {
+            (
+                lines[..max_lines].to_vec(),
+                Some(format!(
+                    "... (truncated, {} more lines)",
+                    lines.len() - max_lines
+                )),
+            )
         } else {
-            lines.iter().map(|s| s.to_string()).collect()
+            (lines.to_vec(), None)
         };
 
-        for line in display_lines {
-            let truncated =
-                crate::render::block::truncate(&line, width.saturating_sub(indent + 2), "…");
-            out.push_str(&field_prefix);
-            out.push_str(&truncated);
+        let (sr, sg, sb) = crate::render::block::hex_to_rgb(crate::render::theme::VESPER.surface);
+        let (pr, pg, pb) =
+            crate::render::block::hex_to_rgb(crate::render::theme::VESPER.placeholder);
+        let bg = format!("\x1b[48;2;{sr};{sg};{sb}m");
+        let dim = format!("\x1b[38;2;{pr};{pg};{pb}m");
+        let reset = "\x1b[0m";
+        let panel_w = width.saturating_sub(indent);
+        let lead = " ".repeat(indent);
+        let pad_line = format!("{lead}{bg}{}{reset}", " ".repeat(panel_w));
+
+        out.push('\n');
+        out.push_str(&pad_line);
+        for line in &content_lines {
+            let line = crate::render::block::truncate(line, panel_w.saturating_sub(2), "…");
+            let line = line.replace(reset, &format!("{reset}{bg}"));
+            let vw = crate::render::block::visible_width(&line);
+            let pad = panel_w.saturating_sub(vw + 1);
             out.push('\n');
+            out.push_str(&lead);
+            out.push_str(&format!("{bg} {line}{}{reset}", " ".repeat(pad)));
         }
+        if let Some(msg) = trunc_msg {
+            let vw = crate::render::block::visible_width(&msg);
+            let pad = panel_w.saturating_sub(vw + 1);
+            out.push('\n');
+            out.push_str(&lead);
+            out.push_str(&format!("{bg} {dim}{msg}{}{reset}", " ".repeat(pad)));
+        }
+        out.push('\n');
+        out.push_str(&pad_line);
         out = out.trim_end().to_string();
     }
 
@@ -429,5 +453,81 @@ mod tests {
         assert_eq!(base.spans[0].style.fg, Some(RAINBOW[0]));
         assert_eq!(shifted.spans[0].style.fg, Some(RAINBOW[1]));
         assert_eq!(base.spans[1].style.fg, shifted.spans[0].style.fg);
+    }
+
+    #[test]
+    fn test_tool_result_panel_wraps_in_background() {
+        let out = render_tool_block(
+            "bash",
+            "{\"command\":\"ls\"}",
+            "file_a.rs\nfile_b.rs",
+            "",
+            "5s",
+            ".",
+            "",
+            false,
+            40,
+            0,
+            0,
+        );
+        let surface_bg = {
+            let (r, g, b) = crate::render::block::hex_to_rgb(crate::render::theme::VESPER.surface);
+            format!("\x1b[48;2;{r};{g};{b}m")
+        };
+        let plain = strip_ansi(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        assert!(
+            lines.len() >= 5,
+            "expected label + 2 pads + 2 result lines, got {}",
+            lines.len()
+        );
+        assert_eq!(lines[0], "ls 5s");
+        assert_eq!(lines[1].trim(), "");
+        assert_eq!(lines[1].len(), 40);
+        assert!(lines[2].starts_with(" file_a.rs"));
+        assert_eq!(lines[2].len(), 40);
+        assert!(lines[3].starts_with(" file_b.rs"));
+        assert_eq!(lines[3].len(), 40);
+        assert_eq!(lines[4].trim(), "");
+        assert_eq!(lines[4].len(), 40);
+        assert!(
+            out.contains(&surface_bg),
+            "result block must use surface background"
+        );
+    }
+
+    #[test]
+    fn test_tool_result_panel_respects_indent() {
+        let out = render_tool_block("read_file", "", "hello", "", "1s", ".", "", false, 40, 2, 0);
+        let plain = strip_ansi(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        assert!(lines[1].starts_with("  "), "pad line must be indented by 2");
+        assert!(
+            lines[2].starts_with("   hello"),
+            "content must be indented by 3"
+        );
+    }
+
+    #[test]
+    fn test_tool_result_panel_truncation_message_present() {
+        let big = (0..60)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = render_tool_block("bash", "", &big, "", "1s", ".", "", false, 80, 0, 0);
+        assert!(out.contains("... (truncated, 10 more lines)"));
+    }
+
+    #[test]
+    fn test_tool_result_collapsed_has_no_panel() {
+        let out = render_tool_block("bash", "", "some output", "", "1s", ".", "", true, 80, 0, 0);
+        let surface_bg = {
+            let (r, g, b) = crate::render::block::hex_to_rgb(crate::render::theme::VESPER.surface);
+            format!("\x1b[48;2;{r};{g};{b}m")
+        };
+        assert!(
+            !out.contains(&surface_bg),
+            "collapsed block must not render panel"
+        );
     }
 }

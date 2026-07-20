@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn command_dropdown_filters_fuzzy() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.open_command_dropdown();
         assert_eq!(s.command_dropdown.items.len(), COMMANDS.len());
 
@@ -265,8 +265,9 @@ mod tests {
             .iter()
             .map(|item| item.label.clone())
             .collect();
-        assert_eq!(labels.len(), 2);
+        assert_eq!(labels.len(), 3);
         assert!(labels.contains(&"Toggle Tool Results".to_string()));
+        assert!(labels.contains(&"Toggle Subagent Calls".to_string()));
         assert!(labels.contains(&"Toggle Thinking".to_string()));
         assert_eq!(s.command_dropdown.selected, 0);
 

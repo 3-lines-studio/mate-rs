@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn layout_grows_and_scrolls() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_size(80, 24);
         s.update_textarea_layout();
         assert_eq!(s.textarea_height, 1);
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn multibyte_char_keeps_cursor_on_boundary() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_size(80, 24);
         s.insert_char('▸');
         assert!(s.textarea.is_char_boundary(s.cursor));
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn cursor_up_down_moves_between_lines() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("hello world\nfoo\nbar");
         s.cursor_end();
         assert_eq!(s.cursor, s.textarea.len());
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn cursor_up_returns_false_on_first_line() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("abc\ndef");
         s.cursor_home();
         assert!(!s.cursor_up());
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn cursor_down_returns_false_on_last_line() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("abc\ndef");
         s.cursor_end();
         assert!(!s.cursor_down());
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn cursor_up_down_clamps_short_line() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("hello world\nab");
         s.cursor_home();
         for _ in 0..5 {
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn word_jump_skips_words() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("hello world foo");
         s.cursor_home();
         s.cursor_right_word();
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn word_jump_left() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("hello world foo");
         s.cursor_end();
         s.cursor_left_word();
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn complete_prefix_template_replaces_only_query() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("review /cr");
         s.cursor_end();
         s.complete_prefix('/', "/code_review ");
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn complete_prefix_file_keeps_at_and_surrounding_text() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("see @sr");
         s.cursor_end();
         s.complete_prefix('@', "@src/main.rs ");
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn complete_prefix_uses_last_trigger_before_cursor() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("/a and /b");
         s.cursor_end();
         s.complete_prefix('/', "/beta ");
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn complete_prefix_noop_without_trigger() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_text("no trigger here");
         s.cursor_end();
         s.complete_prefix('/', "/x ");

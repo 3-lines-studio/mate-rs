@@ -139,6 +139,12 @@ pub struct TUIConfig {
     pub tools_expanded: bool,
     #[serde(default)]
     pub show_thinking: bool,
+    #[serde(default = "default_show_subagent_calls")]
+    pub show_subagent_calls: bool,
+}
+
+fn default_show_subagent_calls() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

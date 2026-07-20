@@ -6,10 +6,12 @@ pub fn save_tui(
     dir: &str,
     tools_expanded: bool,
     show_thinking: bool,
+    show_subagent_calls: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut config = load_from(dir)?;
     config.tui.tools_expanded = tools_expanded;
     config.tui.show_thinking = show_thinking;
+    config.tui.show_subagent_calls = show_subagent_calls;
     save_config(dir, &config)
 }
 

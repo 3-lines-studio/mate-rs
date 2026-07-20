@@ -56,6 +56,7 @@ impl App {
             deps.templates.clone(),
             deps.config.tui.show_thinking,
             deps.config.tui.tools_expanded,
+            deps.config.tui.show_subagent_calls,
         );
         let config_screen = ConfigScreen::new(deps.config_dir.clone());
         App {
@@ -726,20 +727,32 @@ impl App {
             }
             "tools" => {
                 self.chat.tools_expanded = !self.chat.tools_expanded;
-                self.chat.render_messages();
+                self.chat.rerender_all();
                 let _ = crate::config::save_tui(
                     &self.deps.config_dir,
                     self.chat.tools_expanded,
                     self.chat.show_thinking,
+                    self.chat.show_subagent_calls,
+                );
+            }
+            "subagents" => {
+                self.chat.show_subagent_calls = !self.chat.show_subagent_calls;
+                self.chat.rerender_all();
+                let _ = crate::config::save_tui(
+                    &self.deps.config_dir,
+                    self.chat.tools_expanded,
+                    self.chat.show_thinking,
+                    self.chat.show_subagent_calls,
                 );
             }
             "thinking" => {
                 self.chat.show_thinking = !self.chat.show_thinking;
-                self.chat.render_messages();
+                self.chat.rerender_all();
                 let _ = crate::config::save_tui(
                     &self.deps.config_dir,
                     self.chat.tools_expanded,
                     self.chat.show_thinking,
+                    self.chat.show_subagent_calls,
                 );
             }
             "copy-last" => {

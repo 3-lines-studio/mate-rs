@@ -14,7 +14,7 @@ fn test_save_tui_preserves_existing() {
     let cfg_path = mate_dir.join("config.toml");
     write_file(&cfg_path, "[agent]\nmax_tool_rounds = 10\n");
 
-    save_tui(&mate_dir.to_string_lossy(), true, false).unwrap();
+    save_tui(&mate_dir.to_string_lossy(), true, false, true).unwrap();
 
     let data = std::fs::read_to_string(&cfg_path).unwrap();
     let cfg: toml::Table = toml::from_str(&data).unwrap();
@@ -31,7 +31,7 @@ fn test_save_tui_no_existing_file() {
     let mate_dir = dir.path().join("mate");
     std::fs::create_dir_all(&mate_dir).unwrap();
 
-    save_tui(&mate_dir.to_string_lossy(), true, true).unwrap();
+    save_tui(&mate_dir.to_string_lossy(), true, true, true).unwrap();
 
     let cfg_path = mate_dir.join("config.toml");
     let data = std::fs::read_to_string(&cfg_path).unwrap();

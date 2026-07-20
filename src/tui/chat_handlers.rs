@@ -289,19 +289,42 @@ pub fn finish_bot_message(
         match lb.kind.as_str() {
             "prose" => segments.push(Segment::prose(&lb.raw)),
             "thinking" => segments.push(Segment::thinking(&lb.raw)),
-            "tool" => segments.push(Segment::tool(
-                &lb.tool_name,
-                &lb.tool_args,
-                &lb.tool_result,
-                &lb.tool_error,
-                &lb.tool_duration,
-                cwd,
-                &lb.tool_subagent,
-            )),
+            "tool" => {
+                let mut seg = Segment::tool(
+                    &lb.tool_name,
+                    &lb.tool_args,
+                    &lb.tool_result,
+                    &lb.tool_error,
+                    &lb.tool_duration,
+                    cwd,
+                    &lb.tool_subagent,
+                );
+                seg.children = lb_children_to_segments(&lb.children, cwd);
+                segments.push(seg);
+            }
             _ => {}
         }
     }
     messages.push(ChatMsg::assistant(segments));
+}
+
+fn lb_children_to_segments(children: &[LiveBlock], cwd: &str) -> Vec<Segment> {
+    children
+        .iter()
+        .map(|c| {
+            let mut seg = Segment::tool(
+                &c.tool_name,
+                &c.tool_args,
+                &c.tool_result,
+                &c.tool_error,
+                &c.tool_duration,
+                cwd,
+                &c.tool_subagent,
+            );
+            seg.children = lb_children_to_segments(&c.children, cwd);
+            seg
+        })
+        .collect()
 }
 
 pub fn assemble_message_prose(msg: &ChatMsg) -> String {
@@ -356,4 +379,71 @@ pub fn assemble_message_full_text(msg: &ChatMsg) -> String {
         out.push_str(&msg.content);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_block(name: &str, id: &str, children: Vec<LiveBlock>) -> LiveBlock {
+        LiveBlock {
+            kind: "tool".into(),
+            raw: String::new(),
+            rendered: String::new(),
+            tool_name: name.into(),
+            tool_args: String::new(),
+            tool_id: id.into(),
+            tool_result: String::new(),
+            tool_error: String::new(),
+            tool_duration: String::new(),
+            tool_subagent: String::new(),
+            children,
+        }
+    }
+
+    #[test]
+    fn finish_bot_message_preserves_delegate_children() {
+        let delegate = tool_block(
+            "delegate",
+            "d1",
+            vec![
+                tool_block("bash", "c1", vec![]),
+                tool_block("read_file", "c2", vec![]),
+            ],
+        );
+        let mut live_blocks = vec![delegate];
+        let mut messages: Vec<ChatMsg> = Vec::new();
+
+        finish_bot_message(&mut live_blocks, &mut messages, ".");
+
+        assert_eq!(messages.len(), 1);
+        let segs = &messages[0].segments;
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].tool_name, "delegate");
+        assert_eq!(segs[0].children.len(), 2);
+        assert_eq!(segs[0].children[0].tool_name, "bash");
+        assert_eq!(segs[0].children[1].tool_name, "read_file");
+    }
+
+    #[test]
+    fn finish_bot_message_preserves_nested_children() {
+        let delegate = tool_block(
+            "delegate",
+            "d1",
+            vec![tool_block(
+                "bash",
+                "c1",
+                vec![tool_block("read_file", "g1", vec![])],
+            )],
+        );
+        let mut live_blocks = vec![delegate];
+        let mut messages: Vec<ChatMsg> = Vec::new();
+
+        finish_bot_message(&mut live_blocks, &mut messages, ".");
+
+        let segs = &messages[0].segments;
+        assert_eq!(segs[0].children.len(), 1);
+        assert_eq!(segs[0].children[0].children.len(), 1);
+        assert_eq!(segs[0].children[0].children[0].tool_name, "read_file");
+    }
 }

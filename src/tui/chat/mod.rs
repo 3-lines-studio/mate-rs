@@ -40,6 +40,7 @@ pub struct ChatScreen {
     pub context_window: i32,
     pub show_thinking: bool,
     pub tools_expanded: bool,
+    pub show_subagent_calls: bool,
     pub retry_available: bool,
     pub active_session: Option<AgentSession>,
 
@@ -85,6 +86,7 @@ impl ChatScreen {
         templates: Vec<Template>,
         show_thinking: bool,
         tools_expanded: bool,
+        show_subagent_calls: bool,
     ) -> Self {
         let tmpl_items: Vec<super::chat_dropdowns::TemplateItem> = templates
             .iter()
@@ -112,6 +114,7 @@ impl ChatScreen {
             context_window: 0,
             show_thinking,
             tools_expanded,
+            show_subagent_calls,
             retry_available: false,
             active_session: None,
 
@@ -310,7 +313,7 @@ mod tests {
                 (false, Modal::Tree),
             ] {
                 for &tall in &[false, true] {
-                    let mut s = ChatScreen::new(".".into(), vec![], true, true);
+                    let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
                     s.set_size(116, h);
                     for _ in 0..20 {
                         s.add_message("user", &"word ".repeat(60));
@@ -370,7 +373,7 @@ mod tests {
 
     #[test]
     fn follows_new_messages_to_bottom_when_not_scrolled() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_size(80, 24);
         for _ in 0..40 {
             s.add_message("user", &"word ".repeat(200));
@@ -390,7 +393,7 @@ mod tests {
 
     #[test]
     fn stays_pinned_when_user_scrolled_up() {
-        let mut s = ChatScreen::new(".".into(), vec![], true, true);
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
         s.set_size(80, 24);
         for _ in 0..40 {
             s.add_message("user", &"word ".repeat(200));
