@@ -401,7 +401,7 @@ impl ChatScreen {
             }
             return h;
         }
-        let mut h = self.textarea_height + 3;
+        let mut h = self.textarea_height + 2;
         if self.active_modal == super::Modal::Template {
             h += 8;
         }
@@ -576,7 +576,7 @@ impl ChatScreen {
                 );
             }
         } else {
-            let prompt_h = self.textarea_height + 3;
+            let prompt_h = self.textarea_height + 2;
             let top = bottom_area.y + y_offset;
             let input = if self.textarea.is_empty() {
                 "Send a message…"
@@ -603,7 +603,7 @@ impl ChatScreen {
                 parts.push(format!("cache {}", fmt_tokens(self.cache_hit_tokens)));
             }
             parts.push(fmt_cost(self.total_cost));
-            let stats = Line::styled(format!(" {} ", parts.join(" · ")), dim).left_aligned();
+            let stats = Line::styled(format!(" {} ", parts.join(" · ")), dim).right_aligned();
             let info = Line::styled(format!(" {} · {} ", self.model_name, branch_or_cwd), dim)
                 .right_aligned();
 
@@ -611,8 +611,8 @@ impl ChatScreen {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color))
-                .padding(Padding::new(1, 1, 0, 1))
-                .title_bottom(stats)
+                .padding(Padding::new(1, 1, 0, 0))
+                .title_top(stats)
                 .title_bottom(info);
 
             if let Some(h2) = fit_height(area, top, prompt_h) {
