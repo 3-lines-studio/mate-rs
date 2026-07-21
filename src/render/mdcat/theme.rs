@@ -92,7 +92,7 @@ fn vesp(color: &str) -> Color {
     RgbColor(r, g, b).into()
 }
 
-/// Vesper theme for mate-rs.
+/// Vesper theme for mate.
 pub fn vesper() -> Theme {
     let v = crate::render::theme::VESPER;
     let fg = vesp(v.fg);

@@ -13,7 +13,7 @@ pub enum StyleCapability {
     Ansi,
 }
 
-/// A placeholder for image capabilities (not supported in mate-rs).
+/// A placeholder for image capabilities (not supported in mate).
 #[derive(Debug, Copy, Clone)]
 pub enum ImageCapability {
     /// Placeholder variant to satisfy compilation.

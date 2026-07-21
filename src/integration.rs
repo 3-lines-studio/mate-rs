@@ -181,9 +181,14 @@ pub async fn process_prompt<B: StreamingBackend + ?Sized, K>(
     backend.after_finalize().await;
 
     {
-        let sess = sess_arc.lock().unwrap();
-        let mut mgr = manager.lock().unwrap();
-        let _ = mgr.save(session_key, &sess);
+        let fresh = {
+            let mut mgr = manager.lock().unwrap();
+            mgr.reload(session_key)
+        };
+        if let Ok(Some(fresh)) = fresh {
+            let mut sess = sess_arc.lock().unwrap();
+            sess.reload_from(fresh);
+        }
     }
 
     active_prompts.lock().unwrap().remove(&prompt_key);

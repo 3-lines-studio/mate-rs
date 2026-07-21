@@ -96,7 +96,7 @@ impl TerminalSize {
         }
     }
 
-    /// Query the terminal size. Not supported in mate-rs.
+    /// Query the terminal size. Not supported in mate.
     pub fn from_terminal() -> Option<Self> {
         None
     }

@@ -52,15 +52,56 @@ impl SessionManager {
         Ok(sess)
     }
 
-    pub fn save(
+    pub fn reload(
         &mut self,
         key: &str,
-        sess: &AgentSession,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if self.key_store.get(key).is_none() {
-            return Ok(());
+    ) -> Result<Option<Session>, Box<dyn std::error::Error + Send + Sync>> {
+        let Some(session_id) = self.key_store.get(key).cloned() else {
+            return Ok(None);
+        };
+        match self.store.load(&session_id) {
+            Ok(sess) => Ok(Some(sess)),
+            Err(_) => Ok(None),
         }
-        self.store.save_meta(&sess.sess())?;
-        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_manager(dir: &str) -> SessionManager {
+        let store = Store::new(dir).unwrap();
+        let cache = Cache::new(8);
+        let ks = KeyStore::new(&format!("{}/keys.json", dir)).unwrap();
+        let factory: Box<dyn Fn(Session) -> AgentSession + Send + Sync> =
+            Box::new(|_| panic!("factory must not be invoked by reload"));
+        SessionManager::new(store, cache, ks, factory)
+    }
+
+    #[test]
+    fn reload_returns_none_for_unknown_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut mgr = make_manager(&dir.path().to_string_lossy());
+        assert!(mgr.reload("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn reload_reads_advanced_current_turn_from_disk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let dir_s = dir.path().to_string_lossy().to_string();
+
+        let mut store = Store::new(&dir_s).unwrap();
+        let mut sess = store.create().unwrap();
+        sess.current_turn = "t1".to_string();
+        sess.turn_count = 1;
+        store.save_meta(&sess).unwrap();
+
+        let mut mgr = make_manager(&dir_s);
+        mgr.key_store.set("thread-1", &sess.id).unwrap();
+
+        let fresh = mgr.reload("thread-1").unwrap().unwrap();
+        assert_eq!(fresh.current_turn, "t1");
+        assert_eq!(fresh.turn_count, 1);
     }
 }

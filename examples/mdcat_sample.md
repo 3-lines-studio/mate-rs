@@ -117,7 +117,7 @@ A longer table with more columns to stress wrapping:
 
 | Name            | Lang   | Stars | License | Notes                       |
 |-----------------|--------|------:|---------|-----------------------------|
-| mate-rs         | Rust   |   142 | MIT     | This very project           |
+| mate         | Rust   |   142 | MIT     | This very project           |
 | mdcat           | Rust   |  2100 | MPL2    | Source of the renderer      |
 | pulldown-cmark  | Rust   |  1900 | MIT     | The parser underneath       |
 | ratatui         | Rust   | 11000 | MIT     | Terminal UI framework       |
