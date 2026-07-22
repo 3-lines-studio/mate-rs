@@ -227,20 +227,13 @@ impl super::ConfigScreen {
                     id: trimmed.to_string(),
                     name: trimmed.to_string(),
                     provider: String::new(),
-                    description: String::new(),
                     context_window: 0,
                     max_output_tokens: 0,
-                    thinking_type: String::new(),
                     reasoning_effort: String::new(),
-                    reasoning_max_tokens: 0,
                     input_price: 0.0,
                     cached_input_price: 0.0,
                     output_price: 0.0,
                     prompt_cache: false,
-                    prompt_cache_ttl: String::new(),
-                    fallback_models: Vec::new(),
-                    route: String::new(),
-                    provider_sort: String::new(),
                 });
             }
             6 => {

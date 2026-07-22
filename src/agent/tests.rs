@@ -95,18 +95,12 @@ fn dummy_agent() -> AgentSession {
         ModelProfile {
             context_window: 8000,
             max_output_tokens: 0,
-            thinking_type: String::new(),
             reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
             open_router: false,
             input_price: 0.0,
             cached_input_price: 0.0,
             output_price: 0.0,
-            fallback_models: vec![],
-            route: String::new(),
-            provider_prefs: None,
             prompt_cache: false,
-            prompt_cache_ttl: String::new(),
         },
     ));
     let registry = Arc::new(Registry::new());

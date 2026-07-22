@@ -1,6 +1,6 @@
 use super::types::{
     CacheControl, ChatRequest, ModelProfile, ProviderError, ReasoningConfig, StreamEvent,
-    StreamOptions, ThinkingConfig, Usage,
+    StreamOptions, Usage,
 };
 use tokio::sync::mpsc;
 
@@ -142,42 +142,25 @@ impl ChatClient for Client {
 
 pub fn apply_profile(req: &mut ChatRequest, profile: &ModelProfile) {
     if profile.open_router {
-        if !profile.reasoning_effort.is_empty() || profile.reasoning_max_tokens > 0 {
+        if !profile.reasoning_effort.is_empty() {
             req.reasoning = Some(ReasoningConfig {
                 effort: profile.reasoning_effort.clone(),
-                max_tokens: profile.reasoning_max_tokens,
+                max_tokens: 0,
                 exclude: None,
                 enabled: None,
             });
         }
     } else {
-        if !profile.thinking_type.is_empty() {
-            req.thinking = Some(ThinkingConfig {
-                thinking_type: profile.thinking_type.clone(),
-            });
-        }
         if !profile.reasoning_effort.is_empty() {
             req.reasoning_effort = profile.reasoning_effort.clone();
         }
     }
-    if !profile.fallback_models.is_empty() {
-        req.models = profile.fallback_models.clone();
-    }
-    if !profile.route.is_empty() {
-        req.route = profile.route.clone();
-    }
-    if let Some(prefs) = &profile.provider_prefs {
-        req.provider_prefs = Some(prefs.clone());
-    }
 
     if profile.prompt_cache {
-        let mut cc = CacheControl {
+        let cc = CacheControl {
             cc_type: "ephemeral".to_string(),
             ttl: String::new(),
         };
-        if profile.prompt_cache_ttl == "1h" {
-            cc.ttl = "1h".to_string();
-        }
         req.cache_control = Some(cc);
     }
     if !profile.open_router {

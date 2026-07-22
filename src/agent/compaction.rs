@@ -163,12 +163,8 @@ async fn call_compaction(client: &Arc<dyn ChatClient>, prompt: &str) -> Result<S
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };

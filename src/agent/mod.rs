@@ -99,6 +99,7 @@ pub fn build_system_prompt(
     global_md: &str,
     local_md: &str,
     system_prefix: &str,
+    has_tools: bool,
 ) -> String {
     let mut sb = String::new();
     if !system_md.is_empty() {
@@ -109,7 +110,9 @@ pub fn build_system_prompt(
         sb.push_str(system_prefix);
         sb.push_str("\n\n");
     }
-    sb.push_str(&tool_rules_prompt());
+    if has_tools {
+        sb.push_str(&tool_rules_prompt());
+    }
     if !global_md.is_empty() {
         sb.push_str("\n\n## User conventions\n");
         sb.push_str(global_md);

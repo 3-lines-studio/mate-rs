@@ -58,13 +58,13 @@ pub fn init_with_config(
     }
 
     let sp = if system_prompt.is_empty() {
-        agent::build_system_prompt("", "", "", &cfg.agent.prompt)
+        agent::build_system_prompt("", "", "", &cfg.agent.prompt, !cfg.agent.tools.is_empty())
     } else {
         system_prompt
     };
 
     let standard = tools::Registry::standard();
-    let registry = if cfg.agent.tools.is_empty() {
+    let registry = if cfg.agent.tools.iter().any(|t| t == "*") {
         standard
     } else {
         let mut reg = tools::Registry::new();
@@ -128,8 +128,13 @@ pub fn init(
         .to_string_lossy()
         .to_string();
 
-    let system_prompt =
-        agent::build_system_prompt(&system_md, &global_md, &local_md, &cfg.agent.prompt);
+    let system_prompt = agent::build_system_prompt(
+        &system_md,
+        &global_md,
+        &local_md,
+        &cfg.agent.prompt,
+        !cfg.agent.tools.is_empty(),
+    );
 
     let session_dir = cfg.session.dir.clone();
     let mut deps = init_with_config(cfg, system_prompt, &cwd, &session_dir, verbose)?;

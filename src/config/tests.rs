@@ -39,6 +39,55 @@ fn test_save_tui_no_existing_file() {
 }
 
 #[test]
+fn test_save_tui_does_not_write_defaults() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mate_dir = dir.path().join("mate");
+    std::fs::create_dir_all(&mate_dir).unwrap();
+    let cfg_path = mate_dir.join("config.toml");
+    write_file(&cfg_path, "[agent]\nmax_tool_rounds = 10\n");
+
+    save_tui(&mate_dir.to_string_lossy(), true, false, true).unwrap();
+
+    let data = std::fs::read_to_string(&cfg_path).unwrap();
+    let cfg: toml::Table = toml::from_str(&data).unwrap();
+    // Only [tui] should be written; no default sections.
+    assert!(cfg.contains_key("tui"));
+    assert!(!cfg.contains_key("session"));
+    assert!(!cfg.contains_key("slack"));
+    assert!(!cfg.contains_key("telegram"));
+    assert!(!cfg.contains_key("schedule"));
+    assert!(!cfg.contains_key("providers"));
+    assert!(!cfg.contains_key("models"));
+    assert!(!cfg.contains_key("subagents"));
+    // Existing [agent] section preserved.
+    let agent = cfg["agent"].as_table().unwrap();
+    assert_eq!(agent["max_tool_rounds"].as_integer().unwrap(), 10);
+}
+
+#[test]
+fn test_save_tui_preserves_key_order() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mate_dir = dir.path().join("mate");
+    std::fs::create_dir_all(&mate_dir).unwrap();
+    let cfg_path = mate_dir.join("config.toml");
+    // Write keys in non-alphabetical order.
+    write_file(
+        &cfg_path,
+        "[telegram]\nallowed_users = [123]\n\n[agent]\nmax_tool_rounds = 10\n\n[tui]\nshow_thinking = true\n",
+    );
+
+    save_tui(&mate_dir.to_string_lossy(), true, false, true).unwrap();
+
+    let data = std::fs::read_to_string(&cfg_path).unwrap();
+    let pos_telegram = data.find("[telegram]").unwrap();
+    let pos_agent = data.find("[agent]").unwrap();
+    let pos_tui = data.find("[tui]").unwrap();
+    // Order should match the original file, not alphabetical.
+    assert!(pos_telegram < pos_agent);
+    assert!(pos_agent < pos_tui);
+}
+
+#[test]
 fn test_dir_xdg_env() {
     assert_eq!(
         dir_for_env("mate", Some("/tmp/xdg"), "/tmp/home"),
@@ -102,7 +151,7 @@ fn test_load_from_no_config_file() {
 fn test_default() {
     let cfg = Config::default();
     assert_eq!(cfg.agent.max_tool_rounds, 99);
-    assert!(cfg.agent.tools.is_empty());
+    assert_eq!(cfg.agent.tools, vec!["*".to_string()]);
     assert!(!cfg.session.dir.is_empty());
 }
 
@@ -121,6 +170,26 @@ fn test_load_config_file() {
 
     let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
     assert_eq!(cfg.agent.max_tool_rounds, 42);
+}
+
+#[test]
+fn test_agent_tools_default_is_all() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg_path = dir.path().join("config.toml");
+    write_file(&cfg_path, "[agent]\nmax_tool_rounds = 42\n");
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert_eq!(cfg.agent.tools, vec!["*".to_string()]);
+}
+
+#[test]
+fn test_agent_tools_empty_is_none() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let cfg_path = dir.path().join("config.toml");
+    write_file(&cfg_path, "[agent]\ntools = []\n");
+
+    let cfg = load_from(&dir.path().to_string_lossy()).unwrap();
+    assert!(cfg.agent.tools.is_empty());
 }
 
 #[test]
@@ -416,4 +485,41 @@ fn test_save_config_does_not_leak_service_secrets() {
     let written = std::fs::read_to_string(p.join("config.toml")).unwrap();
     assert!(!written.contains("secret-db"));
     assert!(!written.contains("SVC-SECRET-KEY"));
+}
+
+#[test]
+fn test_save_config_atomic_no_temp_left() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let p = dir.path();
+
+    write_file(&p.join("config.toml"), "[agent]\nmax_tool_rounds = 5\n");
+
+    let cfg = load_from(&p.to_string_lossy()).unwrap();
+    save_config(&p.to_string_lossy(), &cfg).unwrap();
+
+    let entries: Vec<_> = std::fs::read_dir(p).unwrap().collect();
+    for entry in entries {
+        let name = entry.unwrap().file_name();
+        assert!(
+            name.to_str().unwrap().starts_with("config.toml"),
+            "unexpected file left behind: {:?}",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_save_config_atomic_replaces_existing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let p = dir.path();
+
+    write_file(&p.join("config.toml"), "[agent]\nmax_tool_rounds = 5\n");
+
+    let mut cfg = load_from(&p.to_string_lossy()).unwrap();
+    cfg.agent.max_tool_rounds = 42;
+    save_config(&p.to_string_lossy(), &cfg).unwrap();
+
+    let written = std::fs::read_to_string(p.join("config.toml")).unwrap();
+    assert!(written.contains("max_tool_rounds = 42"));
+    assert!(!written.contains("max_tool_rounds = 5"));
 }

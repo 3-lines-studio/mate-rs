@@ -126,12 +126,8 @@ async fn test_chat_request_json_shape() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -169,12 +165,8 @@ async fn test_chat_sets_stream_options() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -211,12 +203,8 @@ async fn test_chat_non_200_error() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -244,7 +232,6 @@ async fn test_chat_openrouter_reasoning_config() {
             context_window: 128000,
             max_output_tokens: 4096,
             reasoning_effort: "high".to_string(),
-            reasoning_max_tokens: 2000,
             open_router: true,
             ..Default::default()
         },
@@ -257,12 +244,8 @@ async fn test_chat_openrouter_reasoning_config() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -288,10 +271,8 @@ async fn test_chat_non_openrouter_thinking_config() {
         ModelProfile {
             context_window: 200000,
             max_output_tokens: 4096,
-            thinking_type: "enabled".to_string(),
             reasoning_effort: "high".to_string(),
             prompt_cache: true,
-            prompt_cache_ttl: "1h".to_string(),
             ..Default::default()
         },
     );
@@ -303,12 +284,8 @@ async fn test_chat_non_openrouter_thinking_config() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: "session-123".to_string(),
     };
@@ -348,12 +325,8 @@ async fn test_sse_text_delta() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -399,12 +372,8 @@ async fn test_sse_reasoning_content_delta() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -451,12 +420,8 @@ async fn test_sse_reasoning_delta_fallback() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -504,12 +469,8 @@ async fn test_sse_reasoning_details_prefer_over_fallback() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -558,12 +519,8 @@ async fn test_sse_tool_call_accumulation() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -613,12 +570,8 @@ async fn test_sse_tool_call_emitted_after_done_terminator() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -672,12 +625,8 @@ async fn test_sse_finish_reason() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -725,12 +674,8 @@ async fn test_sse_usage() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -778,12 +723,8 @@ async fn test_sse_usage_cached_tokens_fallback() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -833,12 +774,8 @@ async fn test_sse_usage_explicit_field_wins() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -886,12 +823,8 @@ async fn test_sse_usage_no_cache_field() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -939,12 +872,8 @@ async fn test_sse_reasoning_details_text_merge() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -999,12 +928,8 @@ async fn test_sse_reasoning_details_encrypted() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -1056,12 +981,8 @@ async fn test_sse_reasoning_details_no_index_auto_assigns() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -1107,12 +1028,8 @@ async fn test_sse_done_sentinel() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -1152,12 +1069,8 @@ async fn test_sse_error_in_chunk() {
         stream: false,
         max_tokens: 0,
         stream_options: None,
-        thinking: None,
         reasoning_effort: String::new(),
         reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
         cache_control: None,
         session_id: String::new(),
     };
@@ -1173,81 +1086,4 @@ async fn test_sse_error_in_chunk() {
         }
     }
     assert!(got_error);
-}
-
-#[tokio::test]
-async fn test_chat_request_models_route_json() {
-    let req = ChatRequest {
-        model: "test-model".to_string(),
-        messages: vec![Message {
-            role: Role::User,
-            content: "hi".to_string(),
-            reasoning_content: String::new(),
-            reasoning_details: vec![],
-            tool_calls: vec![],
-            tool_call_id: String::new(),
-            name: String::new(),
-            tool_duration: String::new(),
-        }],
-        tools: vec![],
-        stream: true,
-        max_tokens: 0,
-        stream_options: None,
-        thinking: None,
-        reasoning_effort: String::new(),
-        reasoning: None,
-        models: vec![
-            "anthropic/claude-sonnet-4".to_string(),
-            "openai/gpt-4o".to_string(),
-        ],
-        route: "fallback".to_string(),
-        provider_prefs: Some(ProviderPreferences {
-            order: vec![],
-            allow_fallbacks: None,
-            require_parameters: None,
-            data_collection: String::new(),
-            only: vec![],
-            ignore: vec![],
-            quantizations: vec![],
-            sort: "throughput".to_string(),
-        }),
-        cache_control: None,
-        session_id: String::new(),
-    };
-
-    let json = serde_json::to_string(&req).unwrap();
-    let decoded: ChatRequest = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.models.len(), 2);
-    assert_eq!(decoded.models[0], "anthropic/claude-sonnet-4");
-    assert_eq!(decoded.route, "fallback");
-    assert!(decoded.provider_prefs.is_some());
-    assert_eq!(decoded.provider_prefs.unwrap().sort, "throughput");
-
-    let simple = ChatRequest {
-        model: "test-model".to_string(),
-        messages: vec![Message {
-            role: Role::User,
-            content: "hi".to_string(),
-            reasoning_content: String::new(),
-            reasoning_details: vec![],
-            tool_calls: vec![],
-            tool_call_id: String::new(),
-            name: String::new(),
-            tool_duration: String::new(),
-        }],
-        tools: vec![],
-        stream: true,
-        max_tokens: 0,
-        stream_options: None,
-        thinking: None,
-        reasoning_effort: String::new(),
-        reasoning: None,
-        models: vec![],
-        route: String::new(),
-        provider_prefs: None,
-        cache_control: None,
-        session_id: String::new(),
-    };
-    let simple_json = serde_json::to_string(&simple).unwrap();
-    assert!(!simple_json.contains("\"models\""));
 }

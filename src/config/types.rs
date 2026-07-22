@@ -17,17 +17,11 @@ pub struct ModelConfig {
     pub provider: String,
     pub name: String,
     #[serde(default)]
-    pub description: String,
-    #[serde(default)]
     pub context_window: i32,
     #[serde(default)]
     pub max_output_tokens: i32,
     #[serde(default)]
-    pub thinking_type: String,
-    #[serde(default)]
     pub reasoning_effort: String,
-    #[serde(default)]
-    pub reasoning_max_tokens: i32,
     #[serde(default)]
     pub input_price: f64,
     #[serde(default)]
@@ -36,14 +30,6 @@ pub struct ModelConfig {
     pub output_price: f64,
     #[serde(default)]
     pub prompt_cache: bool,
-    #[serde(default)]
-    pub prompt_cache_ttl: String,
-    #[serde(default)]
-    pub fallback_models: Vec<String>,
-    #[serde(default)]
-    pub route: String,
-    #[serde(default)]
-    pub provider_sort: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +38,7 @@ pub struct AgentConfig {
     pub model: String,
     #[serde(default = "default_max_tool_rounds")]
     pub max_tool_rounds: i32,
-    #[serde(default)]
+    #[serde(default = "default_all_tools")]
     pub tools: Vec<String>,
     #[serde(default)]
     pub interfaces: Vec<String>,
@@ -67,7 +53,7 @@ impl Default for AgentConfig {
         Self {
             model: String::new(),
             max_tool_rounds: default_max_tool_rounds(),
-            tools: vec![],
+            tools: default_all_tools(),
             interfaces: vec![],
             prompt: String::new(),
             compaction_model: String::new(),
@@ -77,6 +63,10 @@ impl Default for AgentConfig {
 
 fn default_max_tool_rounds() -> i32 {
     99
+}
+
+fn default_all_tools() -> Vec<String> {
+    vec!["*".to_string()]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

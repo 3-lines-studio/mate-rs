@@ -33,20 +33,13 @@ const MODEL_FIELDS: &[(&str, FieldKind)] = &[
     ("id", FieldKind::Text),
     ("name", FieldKind::Text),
     ("provider", FieldKind::PickProviders),
-    ("description", FieldKind::Text),
     ("context_window", FieldKind::I32),
     ("max_output_tokens", FieldKind::I32),
-    ("thinking_type", FieldKind::Text),
     ("reasoning_effort", FieldKind::Text),
-    ("reasoning_max_tokens", FieldKind::I32),
     ("input_price", FieldKind::F64),
     ("cached_input_price", FieldKind::F64),
     ("output_price", FieldKind::F64),
     ("prompt_cache", FieldKind::Bool),
-    ("prompt_cache_ttl", FieldKind::Text),
-    ("fallback_models", FieldKind::Comma),
-    ("route", FieldKind::Text),
-    ("provider_sort", FieldKind::Text),
 ];
 
 const SUBAGENT_FIELDS: &[(&str, FieldKind)] = &[
@@ -232,20 +225,13 @@ impl super::ConfigScreen {
                 "id" => m.id.clone(),
                 "name" => m.name.clone(),
                 "provider" => m.provider.clone(),
-                "description" => m.description.clone(),
                 "context_window" => m.context_window.to_string(),
                 "max_output_tokens" => m.max_output_tokens.to_string(),
-                "thinking_type" => m.thinking_type.clone(),
                 "reasoning_effort" => m.reasoning_effort.clone(),
-                "reasoning_max_tokens" => m.reasoning_max_tokens.to_string(),
                 "input_price" => format_f64(m.input_price),
                 "cached_input_price" => format_f64(m.cached_input_price),
                 "output_price" => format_f64(m.output_price),
                 "prompt_cache" => m.prompt_cache.to_string(),
-                "prompt_cache_ttl" => m.prompt_cache_ttl.clone(),
-                "fallback_models" => m.fallback_models.join(", "),
-                "route" => m.route.clone(),
-                "provider_sort" => m.provider_sort.clone(),
                 _ => String::new(),
             }
         } else {
@@ -264,7 +250,6 @@ impl super::ConfigScreen {
                 "id" => m.id = value.to_string(),
                 "name" => m.name = value.to_string(),
                 "provider" => m.provider = value.to_string(),
-                "description" => m.description = value.to_string(),
                 "context_window" => {
                     m.context_window = value
                         .parse::<i32>()
@@ -275,13 +260,7 @@ impl super::ConfigScreen {
                         .parse::<i32>()
                         .map_err(|_| format!("invalid i32: {}", value))?
                 }
-                "thinking_type" => m.thinking_type = value.to_string(),
                 "reasoning_effort" => m.reasoning_effort = value.to_string(),
-                "reasoning_max_tokens" => {
-                    m.reasoning_max_tokens = value
-                        .parse::<i32>()
-                        .map_err(|_| format!("invalid i32: {}", value))?
-                }
                 "input_price" => {
                     m.input_price = value
                         .parse::<f64>()
@@ -302,10 +281,6 @@ impl super::ConfigScreen {
                         .parse::<bool>()
                         .map_err(|_| format!("invalid bool: {}", value))?
                 }
-                "prompt_cache_ttl" => m.prompt_cache_ttl = value.to_string(),
-                "fallback_models" => m.fallback_models = parse_comma(value),
-                "route" => m.route = value.to_string(),
-                "provider_sort" => m.provider_sort = value.to_string(),
                 _ => {}
             }
         }

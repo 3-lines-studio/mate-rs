@@ -1,6 +1,6 @@
 use crate::agent;
 use crate::config::{Config, ModelConfig, ProviderConfig};
-use crate::provider::{Client, ModelProfile, ProviderPreferences};
+use crate::provider::{Client, ModelProfile};
 use crate::tools::Registry;
 use std::collections::HashMap;
 
@@ -28,31 +28,12 @@ pub fn resolve_client(
     let profile = ModelProfile {
         context_window: m.context_window,
         max_output_tokens: m.max_output_tokens,
-        thinking_type: m.thinking_type.clone(),
         reasoning_effort: m.reasoning_effort.clone(),
-        reasoning_max_tokens: m.reasoning_max_tokens,
         open_router: p.open_router,
         input_price: m.input_price,
         cached_input_price: m.cached_input_price,
         output_price: m.output_price,
-        fallback_models: m.fallback_models.clone(),
-        route: m.route.clone(),
-        provider_prefs: if m.provider_sort.is_empty() {
-            None
-        } else {
-            Some(ProviderPreferences {
-                order: Vec::new(),
-                allow_fallbacks: None,
-                require_parameters: None,
-                data_collection: String::new(),
-                only: Vec::new(),
-                ignore: Vec::new(),
-                quantizations: Vec::new(),
-                sort: m.provider_sort.clone(),
-            })
-        },
         prompt_cache: m.prompt_cache,
-        prompt_cache_ttl: m.prompt_cache_ttl.clone(),
     };
 
     let mut client = Client::new(&p.base_url, &m.name, &p.api_key, profile);
@@ -84,14 +65,25 @@ pub fn resolve_subagents(
             };
 
         let std = Registry::standard();
-        let mut reg = Registry::new();
-        for name in &sc.tools {
-            if let Some(t) = std.get(name) {
-                let _ = reg.register(t.clone());
+        let reg = if sc.tools.iter().any(|t| t == "*") {
+            std
+        } else {
+            let mut reg = Registry::new();
+            for name in &sc.tools {
+                if let Some(t) = std.get(name) {
+                    let _ = reg.register(t.clone());
+                }
             }
-        }
+            reg
+        };
 
-        let prompt = agent::build_system_prompt(system_md, global_md, local_md, &sc.prompt);
+        let prompt = agent::build_system_prompt(
+            system_md,
+            global_md,
+            local_md,
+            &sc.prompt,
+            !sc.tools.is_empty(),
+        );
         defs.insert(
             sc.id.clone(),
             agent::SubagentDef {

@@ -1,6 +1,5 @@
-use super::load::load_from;
 use super::path::config_path;
-use super::types::Config;
+use super::types::{Config, TUIConfig};
 
 pub fn save_tui(
     dir: &str,
@@ -8,11 +7,14 @@ pub fn save_tui(
     show_thinking: bool,
     show_subagent_calls: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut config = load_from(dir)?;
-    config.tui.tools_expanded = tools_expanded;
-    config.tui.show_thinking = show_thinking;
-    config.tui.show_subagent_calls = show_subagent_calls;
-    save_config(dir, &config)
+    let mut data = load_config_map(dir)?;
+    let tui = toml::Value::try_from(TUIConfig {
+        tools_expanded,
+        show_thinking,
+        show_subagent_calls,
+    })?;
+    data.insert("tui".to_string(), tui);
+    write_config_map(dir, &data)
 }
 
 pub fn save_config(
@@ -48,6 +50,12 @@ fn write_config_map(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cfg_path = config_path(dir);
     let content = toml::to_string(data)?;
-    std::fs::write(&cfg_path, content)?;
+    let parent = cfg_path.parent().unwrap_or(std::path::Path::new(dir));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    use std::io::Write;
+    tmp.write_all(content.as_bytes())?;
+    tmp.flush()?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(&cfg_path)?;
     Ok(())
 }

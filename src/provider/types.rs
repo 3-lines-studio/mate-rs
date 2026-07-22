@@ -4,12 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThinkingConfig {
-    #[serde(rename = "type")]
-    pub thinking_type: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub effort: String,
@@ -44,60 +38,26 @@ pub struct ChatRequest {
     pub max_tokens: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_options: Option<StreamOptions>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<ThinkingConfig>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reasoning_effort: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningConfig>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub models: Vec<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub route: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "provider")]
-    pub provider_prefs: Option<ProviderPreferences>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_control: Option<CacheControl>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub session_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderPreferences {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub order: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_fallbacks: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub require_parameters: Option<bool>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub data_collection: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub only: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ignore: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub quantizations: Vec<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub sort: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct ModelProfile {
     pub context_window: i32,
     pub max_output_tokens: i32,
-    pub thinking_type: String,
     pub reasoning_effort: String,
-    pub reasoning_max_tokens: i32,
     pub open_router: bool,
     pub input_price: f64,
     pub cached_input_price: f64,
     pub output_price: f64,
-    pub fallback_models: Vec<String>,
-    pub route: String,
-    pub provider_prefs: Option<ProviderPreferences>,
     pub prompt_cache: bool,
-    pub prompt_cache_ttl: String,
 }
 
 impl Default for ModelProfile {
@@ -105,18 +65,12 @@ impl Default for ModelProfile {
         Self {
             context_window: 0,
             max_output_tokens: 0,
-            thinking_type: String::new(),
             reasoning_effort: String::new(),
-            reasoning_max_tokens: 0,
             open_router: false,
             input_price: 0.0,
             cached_input_price: 0.0,
             output_price: 0.0,
-            fallback_models: Vec::new(),
-            route: String::new(),
-            provider_prefs: None,
             prompt_cache: false,
-            prompt_cache_ttl: String::new(),
         }
     }
 }
