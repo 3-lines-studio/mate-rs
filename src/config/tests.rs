@@ -508,6 +508,33 @@ fn test_save_config_atomic_no_temp_left() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn test_save_config_preserves_symlink() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::TempDir::new().unwrap();
+    let mate_dir = dir.path().join("mate");
+    std::fs::create_dir_all(&mate_dir).unwrap();
+
+    let target = dir.path().join("actual.toml");
+    write_file(&target, "[agent]\nmax_tool_rounds = 5\n");
+    let cfg_path = mate_dir.join("config.toml");
+    symlink(&target, &cfg_path).unwrap();
+
+    let cfg = load_from(&mate_dir.to_string_lossy()).unwrap();
+    save_config(&mate_dir.to_string_lossy(), &cfg).unwrap();
+
+    assert!(
+        std::fs::symlink_metadata(&cfg_path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read_link(&cfg_path).unwrap(), target);
+    let written = std::fs::read_to_string(&target).unwrap();
+    assert!(written.contains("max_tool_rounds"));
+}
+
 #[test]
 fn test_save_config_atomic_replaces_existing() {
     let dir = tempfile::TempDir::new().unwrap();

@@ -50,12 +50,25 @@ fn write_config_map(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cfg_path = config_path(dir);
     let content = toml::to_string(data)?;
-    let parent = cfg_path.parent().unwrap_or(std::path::Path::new(dir));
+    let target = if cfg_path.is_symlink() {
+        let link = std::fs::read_link(&cfg_path)?;
+        if link.is_absolute() {
+            link
+        } else {
+            cfg_path
+                .parent()
+                .unwrap_or(std::path::Path::new(dir))
+                .join(link)
+        }
+    } else {
+        cfg_path.clone()
+    };
+    let parent = target.parent().unwrap_or(std::path::Path::new(dir));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
     use std::io::Write;
     tmp.write_all(content.as_bytes())?;
     tmp.flush()?;
     tmp.as_file().sync_all()?;
-    tmp.persist(&cfg_path)?;
+    tmp.persist(&target)?;
     Ok(())
 }
