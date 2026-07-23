@@ -210,32 +210,35 @@ impl super::AgentSession {
                 }
                 match ev {
                     StreamEvent::Error { error } => {
-                        if !has_content && !has_tool_calls && !has_reasoning
-                            && attempt < MAX_ATTEMPTS - 1 {
-                                let shift = 1u64 << attempt;
-                                let delay = Duration::from_secs(2 * shift).min(MAX_DELAY);
-                                let jitter = delay.as_secs_f64()
-                                    * 0.25
-                                    * (2.0 * rand::rng().random::<f64>() - 1.0);
-                                let delay = Duration::from_secs_f64(delay.as_secs_f64() + jitter);
-                                log::warn!(
-                                    "stream stalled on empty attempt {}/{}: {} — retrying",
+                        if !has_content
+                            && !has_tool_calls
+                            && !has_reasoning
+                            && attempt < MAX_ATTEMPTS - 1
+                        {
+                            let shift = 1u64 << attempt;
+                            let delay = Duration::from_secs(2 * shift).min(MAX_DELAY);
+                            let jitter = delay.as_secs_f64()
+                                * 0.25
+                                * (2.0 * rand::rng().random::<f64>() - 1.0);
+                            let delay = Duration::from_secs_f64(delay.as_secs_f64() + jitter);
+                            log::warn!(
+                                "stream stalled on empty attempt {}/{}: {} — retrying",
+                                attempt + 1,
+                                MAX_ATTEMPTS,
+                                error
+                            );
+                            let _ = events
+                                .send(Event::retry_ev(&format!(
+                                    "Attempt {}/{} failed: {} — retrying in {}",
                                     attempt + 1,
                                     MAX_ATTEMPTS,
-                                    error
-                                );
-                                let _ = events
-                                    .send(Event::retry_ev(&format!(
-                                        "Attempt {}/{} failed: {} — retrying in {}",
-                                        attempt + 1,
-                                        MAX_ATTEMPTS,
-                                        error,
-                                        format_duration(delay)
-                                    )))
-                                    .await;
-                                tokio::time::sleep(delay).await;
-                                continue 'attempt;
-                            }
+                                    error,
+                                    format_duration(delay)
+                                )))
+                                .await;
+                            tokio::time::sleep(delay).await;
+                            continue 'attempt;
+                        }
                         return Err(error);
                     }
                     StreamEvent::TextDelta { delta } => {

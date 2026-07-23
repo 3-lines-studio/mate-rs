@@ -131,20 +131,39 @@ fn run_cmd(args: &[String]) {
     let sess = deps.store.create().unwrap();
     let mut asession = deps.new_session(sess);
 
+    let render_md = is_stdout_tty();
+    let term_w = terminal_width();
+    let mut md_buf = String::new();
+
     let mut events = asession.prompt(&final_prompt);
     while let Some(ev) = rt.block_on(events.recv()) {
-        match mate::agent::print_event(&ev, false) {
-            mate::agent::StdioEvent::Handled => {}
-            mate::agent::StdioEvent::ToolError { name, error } => {
+        match &ev.kind {
+            mate::agent::EventKind::TextDelta(delta) => {
+                if render_md {
+                    md_buf.push_str(delta);
+                } else {
+                    print!("{}", delta);
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                }
+            }
+            mate::agent::EventKind::ToolError { name, error, .. } => {
                 eprintln!("❌ {}: {}", name, error);
             }
-            mate::agent::StdioEvent::Error(msg) => {
+            mate::agent::EventKind::Error(msg) => {
                 eprintln!("Error: {}", msg);
                 std::process::exit(1);
             }
-            mate::agent::StdioEvent::AgentDone => {
-                println!();
+            mate::agent::EventKind::AgentDone(_) => {
+                if render_md && !md_buf.is_empty() {
+                    let renderer = mate::render::StreamRenderer::new(term_w);
+                    println!("{}", renderer.render(&md_buf));
+                    md_buf.clear();
+                } else {
+                    println!();
+                }
             }
+            _ => {}
         }
     }
 }
@@ -400,4 +419,35 @@ fn is_stdin_tty() -> bool {
 #[cfg(not(unix))]
 fn is_stdin_tty() -> bool {
     false
+}
+
+#[cfg(unix)]
+fn is_stdout_tty() -> bool {
+    unsafe { libc::isatty(1) != 0 }
+}
+
+#[cfg(not(unix))]
+fn is_stdout_tty() -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn terminal_width() -> usize {
+    let mut ws = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let rc = unsafe { libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) };
+    if rc == 0 && ws.ws_col > 0 {
+        ws.ws_col as usize
+    } else {
+        80
+    }
+}
+
+#[cfg(not(unix))]
+fn terminal_width() -> usize {
+    80
 }
