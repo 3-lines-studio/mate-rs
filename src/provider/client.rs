@@ -99,10 +99,23 @@ impl ChatClient for Client {
             .header("User-Agent", "mate/1.0")
             .body(body);
 
-        let resp = http_req.send().await.map_err(|e| ProviderError {
-            status_code: 0,
-            body: format!("http request: {}", e),
-        })?;
+        let resp =
+            match tokio::time::timeout(std::time::Duration::from_secs(60), http_req.send()).await {
+                Err(_elapsed) => {
+                    log::warn!("request head timeout");
+                    return Err(ProviderError {
+                        status_code: 0,
+                        body: "request head timeout".to_string(),
+                    });
+                }
+                Ok(Err(e)) => {
+                    return Err(ProviderError {
+                        status_code: 0,
+                        body: format!("http request: {}", e),
+                    });
+                }
+                Ok(Ok(resp)) => resp,
+            };
 
         if resp.status().as_u16() != 200 {
             let status = resp.status().as_u16();

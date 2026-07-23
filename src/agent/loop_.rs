@@ -163,13 +163,9 @@ impl super::AgentSession {
         const MAX_ATTEMPTS: usize = 5;
         const MAX_DELAY: Duration = Duration::from_secs(30);
 
-        let mut rx = None;
-        for attempt in 0..MAX_ATTEMPTS {
-            match self.client.chat(req.clone()).await {
-                Ok(r) => {
-                    rx = Some(r);
-                    break;
-                }
+        'attempt: for attempt in 0..MAX_ATTEMPTS {
+            let mut rx = match self.client.chat(req.clone()).await {
+                Ok(r) => r,
                 Err(e) => {
                     if !e.retryable() {
                         return Err(e);
@@ -190,61 +186,98 @@ impl super::AgentSession {
                             )))
                             .await;
                         tokio::time::sleep(delay).await;
+                        continue 'attempt;
                     } else {
                         return Err(e);
                     }
                 }
+            };
+
+            let mut result = RoundResult {
+                content: String::new(),
+                reasoning: String::new(),
+                reasoning_details: vec![],
+                tool_calls: vec![],
+                finish_reason: String::new(),
+            };
+            let mut has_content = false;
+            let mut has_tool_calls = false;
+            let mut has_reasoning = false;
+
+            while let Some(ev) = rx.recv().await {
+                if events.is_closed() {
+                    break;
+                }
+                match ev {
+                    StreamEvent::Error { error } => {
+                        if !has_content && !has_tool_calls && !has_reasoning
+                            && attempt < MAX_ATTEMPTS - 1 {
+                                let shift = 1u64 << attempt;
+                                let delay = Duration::from_secs(2 * shift).min(MAX_DELAY);
+                                let jitter = delay.as_secs_f64()
+                                    * 0.25
+                                    * (2.0 * rand::rng().random::<f64>() - 1.0);
+                                let delay = Duration::from_secs_f64(delay.as_secs_f64() + jitter);
+                                log::warn!(
+                                    "stream stalled on empty attempt {}/{}: {} — retrying",
+                                    attempt + 1,
+                                    MAX_ATTEMPTS,
+                                    error
+                                );
+                                let _ = events
+                                    .send(Event::retry_ev(&format!(
+                                        "Attempt {}/{} failed: {} — retrying in {}",
+                                        attempt + 1,
+                                        MAX_ATTEMPTS,
+                                        error,
+                                        format_duration(delay)
+                                    )))
+                                    .await;
+                                tokio::time::sleep(delay).await;
+                                continue 'attempt;
+                            }
+                        return Err(error);
+                    }
+                    StreamEvent::TextDelta { delta } => {
+                        has_content = true;
+                        result.content.push_str(&delta);
+                        let _ = events.send(Event::text_delta(&delta)).await;
+                    }
+                    StreamEvent::ReasoningDelta { delta } => {
+                        has_reasoning = true;
+                        result.reasoning.push_str(&delta);
+                        let _ = events.send(Event::reasoning_delta(&delta)).await;
+                    }
+                    StreamEvent::ToolCall { call } => {
+                        has_tool_calls = true;
+                        result.tool_calls.push(call);
+                    }
+                    StreamEvent::Usage { usage } => {
+                        self.sess.prompt_tokens += usage.prompt_tokens;
+                        self.sess.completion_tokens += usage.completion_tokens;
+                        self.sess.context_tokens = usage.total_tokens;
+                        if self.sess.context_tokens == 0 {
+                            self.sess.context_tokens =
+                                usage.prompt_tokens + usage.completion_tokens;
+                        }
+                        self.sess.cost += self.client.cost_for(&usage);
+                        let _ = events.send(Event::usage_ev(usage)).await;
+                    }
+                    StreamEvent::ReasoningDetails { details } => {
+                        result.reasoning_details = details;
+                    }
+                    StreamEvent::FinishReason { reason } => {
+                        result.finish_reason = reason;
+                    }
+                }
             }
+            return Ok(result);
         }
 
-        let mut rx = rx.ok_or_else(|| ProviderError {
+        Err(ProviderError {
             status_code: 0,
             body: "chat returned no stream".into(),
-        })?;
-        let mut result = RoundResult {
-            content: String::new(),
-            reasoning: String::new(),
-            reasoning_details: vec![],
-            tool_calls: vec![],
-            finish_reason: String::new(),
-        };
-
-        while let Some(ev) = rx.recv().await {
-            if events.is_closed() {
-                break;
-            }
-            match ev {
-                StreamEvent::Error { error } => return Err(error),
-                StreamEvent::TextDelta { delta } => {
-                    result.content.push_str(&delta);
-                    let _ = events.send(Event::text_delta(&delta)).await;
-                }
-                StreamEvent::ReasoningDelta { delta } => {
-                    result.reasoning.push_str(&delta);
-                    let _ = events.send(Event::reasoning_delta(&delta)).await;
-                }
-                StreamEvent::ToolCall { call } => {
-                    result.tool_calls.push(call);
-                }
-                StreamEvent::Usage { usage } => {
-                    self.sess.prompt_tokens += usage.prompt_tokens;
-                    self.sess.completion_tokens += usage.completion_tokens;
-                    self.sess.context_tokens = usage.total_tokens;
-                    if self.sess.context_tokens == 0 {
-                        self.sess.context_tokens = usage.prompt_tokens + usage.completion_tokens;
-                    }
-                    self.sess.cost += self.client.cost_for(&usage);
-                    let _ = events.send(Event::usage_ev(usage)).await;
-                }
-                StreamEvent::ReasoningDetails { details } => {
-                    result.reasoning_details = details;
-                }
-                StreamEvent::FinishReason { reason } => {
-                    result.finish_reason = reason;
-                }
-            }
-        }
-        Ok(result)
+        })
     }
 
     async fn commit_turn(&mut self, parent_id: &str) {

@@ -181,21 +181,35 @@ pub(crate) async fn read_stream(
     let mut reasoning_details: HashMap<i32, ReasoningDetail> = HashMap::new();
     let mut reasoning_detail_order: Vec<i32> = Vec::new();
 
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = match chunk_result {
-            Ok(c) => c,
-            Err(_) => {
-                let _ = tx
-                    .send(StreamEvent::Error {
-                        error: ProviderError {
-                            status_code: 0,
-                            body: "stream read error".to_string(),
-                        },
-                    })
-                    .await;
-                return;
-            }
-        };
+    loop {
+        let chunk =
+            match tokio::time::timeout(std::time::Duration::from_secs(60), stream.next()).await {
+                Err(_) => {
+                    log::warn!("stream idle timeout after 60s");
+                    let _ = tx
+                        .send(StreamEvent::Error {
+                            error: ProviderError {
+                                status_code: 0,
+                                body: "stream idle timeout after 60s".to_string(),
+                            },
+                        })
+                        .await;
+                    return;
+                }
+                Ok(None) => break,
+                Ok(Some(Err(_))) => {
+                    let _ = tx
+                        .send(StreamEvent::Error {
+                            error: ProviderError {
+                                status_code: 0,
+                                body: "stream read error".to_string(),
+                            },
+                        })
+                        .await;
+                    return;
+                }
+                Ok(Some(Ok(c))) => c,
+            };
 
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
