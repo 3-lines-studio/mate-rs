@@ -12,6 +12,7 @@ impl super::AgentSession {
         user_text: &str,
         events: &tokio::sync::mpsc::Sender<Event>,
     ) {
+        let _herdr = crate::herdr::WorkingGuard::enter(!self.subagents_state.is_subagent);
         let loop_start = std::time::Instant::now();
         self.working_messages.clear();
         self.subagents_state.subagent_turns.clear();

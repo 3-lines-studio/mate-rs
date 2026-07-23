@@ -53,6 +53,12 @@ impl ChatScreen {
         }
     }
 
+    pub fn delete_after_cursor(&mut self) {
+        if self.cursor < self.textarea.len() {
+            self.textarea.remove(self.cursor);
+        }
+    }
+
     pub fn cursor_left(&mut self) {
         if self.cursor > 0 {
             let prev = self.textarea[..self.cursor]
@@ -426,6 +432,30 @@ mod tests {
         s.delete_before_cursor();
         assert_eq!(s.textarea, "");
         assert_eq!(s.cursor, 0);
+    }
+
+    #[test]
+    fn delete_after_cursor_removes_char_to_right() {
+        let mut s = ChatScreen::new(".".into(), vec![], true, true, true);
+        s.set_size(80, 24);
+        s.set_text("hello");
+        s.cursor_home();
+        s.delete_after_cursor();
+        assert_eq!(s.textarea, "ello");
+        assert_eq!(s.cursor, 0);
+
+        s.set_text("he▸llo");
+        s.cursor_home();
+        s.cursor_right();
+        s.cursor_right();
+        s.delete_after_cursor();
+        assert_eq!(s.textarea, "hello");
+        assert_eq!(s.cursor, 2);
+
+        s.cursor_end();
+        s.delete_after_cursor();
+        assert_eq!(s.textarea, "hello");
+        assert_eq!(s.cursor, 5);
     }
 
     #[test]

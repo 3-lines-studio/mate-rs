@@ -28,7 +28,7 @@ pub fn run_definition(
         i += 1;
     }
 
-    let mut deps = bootstrap::init(verbose, config_dir)?;
+    let mut deps = bootstrap::init(verbose, config_dir, false)?;
 
     if debug_prompts {
         print_debug_prompts(&mut deps);

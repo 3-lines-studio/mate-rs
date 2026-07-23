@@ -67,7 +67,7 @@ const COMPACTION_BUDGET_DIVISOR: i32 = 3;
 
 fn tool_rules_prompt() -> String {
     format!(
-        "CRITICAL TOOL RULES:\n- Use tools directly — never describe what you'd do, execute it.\n- Do not fabricate results.\n- Non-delegate tool calls timeout after {} seconds.\n- Prefer `symbols` (kind: find/refs/list) over grep for symbol lookups in Rust, Go, TS/TSX/JSX, CSS.",
+        "CRITICAL TOOL RULES:\n- Use tools directly — never describe what you'd do, execute it.\n- Do not fabricate results.\n- Non-delegate tool calls timeout after {} seconds.\n- Prefer `symbols` over grep for symbol lookups in Rust, Go, TS/TSX/JSX, CSS. Use grep to find occurrences/references.",
         TOOL_TIMEOUT_SECS
     )
 }

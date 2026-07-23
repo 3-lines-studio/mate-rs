@@ -77,6 +77,7 @@ impl App {
         execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
         terminal.clear()?;
 
+        crate::herdr::report(crate::herdr::State::Idle);
         self.session_list.load(&mut self.deps.store);
 
         while !self.should_quit {
@@ -472,6 +473,7 @@ impl App {
                                     KeyCode::Home => self.chat.cursor_home(),
                                     KeyCode::End => self.chat.cursor_end(),
                                     KeyCode::Backspace => self.chat.delete_before_cursor(),
+                                    KeyCode::Delete => self.chat.delete_after_cursor(),
                                     KeyCode::Enter => self.chat.insert_char('\n'),
                                     KeyCode::Char(c) => self.chat.insert_char(c),
                                     KeyCode::PageUp => {

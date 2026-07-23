@@ -18,11 +18,7 @@ pub struct IndexBuildParams {
 
 #[derive(Debug, Deserialize)]
 pub struct SymbolsParams {
-    pub kind: String,
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub file: String,
+    pub query: String,
     #[serde(default)]
     pub path: String,
     #[serde(default)]
@@ -35,13 +31,19 @@ struct IndexDef {
     kind: String,
     file: String,
     line: usize,
+    #[serde(default)]
+    signature: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct IndexData {
     files: HashMap<String, f64>,
     defs: Vec<IndexDef>,
+    #[serde(default)]
+    version: u32,
 }
+
+const INDEX_VERSION: u32 = 1;
 
 const SUPPORTED_EXTS: &[&str] = &["rs", "go", "ts", "tsx", "jsx", "css"];
 fn project_hash(root: &str) -> String {
@@ -138,16 +140,8 @@ pub fn symbols_tool() -> Tool {
     let params = crate::tools::object_schema(
         &[
             (
-                "kind",
-                serde_json::json!({"type": "string", "description": "Query kind: \"find\" (definitions), \"refs\" (call sites), or \"list\" (symbols in a file)"}),
-            ),
-            (
-                "name",
-                serde_json::json!({"type": "string", "description": "Symbol name (exact match) for find/refs queries"}),
-            ),
-            (
-                "file",
-                serde_json::json!({"type": "string", "description": "Relative file path for list query"}),
+                "query",
+                serde_json::json!({"type": "string", "description": "Case-insensitive substring match over symbol name and file"}),
             ),
             (
                 "path",
@@ -158,12 +152,12 @@ pub fn symbols_tool() -> Tool {
                 serde_json::json!({"type": "integer", "description": "Maximum results (default: 100)"}),
             ),
         ],
-        &["kind"],
+        &["query"],
     );
 
     define_tool(
         "symbols",
-        "Symbol-aware code navigation for Rust, Go, TS/TSX/JSX, CSS — faster and more precise than grep, which also matches text inside strings and comments (this reads the syntax tree, so results are real definitions/call sites, not stray mentions). kind=\"find\" + name: where a symbol is defined. kind=\"refs\" + name: every call site. kind=\"list\" + file: all symbols in a file. Example: {\"kind\":\"find\",\"name\":\"Parser\"}. Output: tab-separated rows of name, kind, file:line. Prefer this over grep for any symbol lookup.",
+        "Symbol-aware code navigation for Rust, Go, TS/TSX/JSX, CSS — faster and more precise than grep (reads syntax tree). Case-insensitive substring match over symbol name and file. Output: name\\tkind\\tfile:line\\tsignature. For occurrences/references, use grep.",
         params,
         |p: SymbolsParams| async move { execute_symbols(p) },
     )
@@ -178,6 +172,7 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
         IndexData {
             files: HashMap::new(),
             defs: Vec::new(),
+            version: INDEX_VERSION,
         }
     } else {
         load_index(&p.path)
@@ -199,6 +194,7 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
     let mut new_files: HashMap<String, f64> = HashMap::new();
     let mut new_defs: Vec<IndexDef> = Vec::new();
     let force = p.force;
+    let mut dirty = p.force;
 
     for rel in &to_process {
         let abs_path = root.join(rel);
@@ -222,12 +218,20 @@ fn execute_index_build(mut p: IndexBuildParams) -> Result<String, String> {
         let defs = process_file(root, rel, current_mtime)?;
         new_files.insert(rel.clone(), current_mtime);
         new_defs.extend(defs);
+        dirty = true;
+    }
+
+    if index.files.len() != new_files.len() {
+        dirty = true;
     }
 
     index.files = new_files;
     index.defs = new_defs;
+    index.version = INDEX_VERSION;
 
-    save_index(&p.path, &index)?;
+    if dirty {
+        save_index(&p.path, &index)?;
+    }
 
     let count = index.defs.len();
     Ok(format!(
@@ -245,77 +249,86 @@ fn execute_symbols(mut p: SymbolsParams) -> Result<String, String> {
         p.max_results = 100;
     }
 
-    let index_path = index_store_dir(&p.path).join("index.json");
-    if !index_path.exists() {
-        execute_index_build(IndexBuildParams {
-            path: p.path.clone(),
-            force: false,
-        })?;
+    execute_index_build(IndexBuildParams {
+        path: p.path.clone(),
+        force: false,
+    })?;
+
+    if p.query.is_empty() {
+        return Ok(String::new());
     }
 
     let index = load_index(&p.path);
+    let query_lower = p.query.to_lowercase();
+    let mut scored: Vec<(usize, usize, String, &IndexDef)> = Vec::new();
 
-    match p.kind.as_str() {
-        "find" => {
-            if p.name.is_empty() {
-                return Err("index: 'name' is required for find query".to_string());
-            }
-            let results: Vec<String> = index
-                .defs
-                .iter()
-                .filter(|d| d.name == p.name)
-                .take(p.max_results as usize)
-                .map(|d| format!("{}\t{}\t{}:{}", d.name, d.kind, d.file, d.line))
-                .collect();
-            if results.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(results.join("\n"))
-            }
-        }
-        "refs" => {
-            if p.name.is_empty() {
-                return Err("index: 'name' is required for refs query".to_string());
-            }
-            find_refs(&p.path, &p.name, p.max_results)
-        }
-        "list" => {
-            if p.file.is_empty() {
-                return Err("index: 'file' is required for list query".to_string());
-            }
-            let results: Vec<String> = index
-                .defs
-                .iter()
-                .filter(|d| d.file == p.file)
-                .take(p.max_results as usize)
-                .map(|d| format!("{}\t{}\t{}", d.name, d.kind, d.line))
-                .collect();
-            if results.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(results.join("\n"))
-            }
-        }
-        _ => Err(format!(
-            "index: unknown query kind '{}', expected 'find', 'refs', or 'list'",
-            p.kind
-        )),
+    for d in &index.defs {
+        let name_lower = d.name.to_lowercase();
+        let file_lower = d.file.to_lowercase();
+        let score = if name_lower == query_lower {
+            0
+        } else if name_lower.starts_with(&query_lower) {
+            1
+        } else if name_lower.contains(&query_lower) {
+            2
+        } else if file_lower.contains(&query_lower) {
+            3
+        } else {
+            continue;
+        };
+        scored.push((score, d.name.len(), d.file.clone(), d));
+    }
+
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+
+    let results: Vec<String> = scored
+        .iter()
+        .take(p.max_results as usize)
+        .map(|(_, _, _, d)| {
+            format!(
+                "{}\t{}\t{}:{}\t{}",
+                d.name, d.kind, d.file, d.line, d.signature
+            )
+        })
+        .collect();
+
+    if results.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(results.join("\n"))
     }
 }
 
 fn load_index(root: &str) -> IndexData {
     let path = index_store_dir(root).join("index.json");
     match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            log::warn!("index parse failed, rebuilding {}: {}", path.display(), e);
-            IndexData {
-                files: HashMap::new(),
-                defs: Vec::new(),
+        Ok(s) => {
+            let index: IndexData = serde_json::from_str(&s).unwrap_or_else(|e| {
+                log::warn!("index parse failed, rebuilding {}: {}", path.display(), e);
+                IndexData {
+                    files: HashMap::new(),
+                    defs: Vec::new(),
+                    version: 0,
+                }
+            });
+            if index.version != INDEX_VERSION {
+                log::info!(
+                    "index version mismatch ({} != {}), rebuilding",
+                    index.version,
+                    INDEX_VERSION
+                );
+                return IndexData {
+                    files: HashMap::new(),
+                    defs: Vec::new(),
+                    version: INDEX_VERSION,
+                };
             }
-        }),
+            index
+        }
         Err(_) => IndexData {
             files: HashMap::new(),
             defs: Vec::new(),
+            version: INDEX_VERSION,
         },
     }
 }
@@ -400,125 +413,47 @@ fn extract_defs(
                 .utf8_text(source.as_bytes())
                 .map_err(|e| format!("index: {}", e))?;
             let line = node.start_position().row + 1;
+            let signature = node
+                .parent()
+                .and_then(|p| p.utf8_text(source.as_bytes()).ok())
+                .and_then(|t| t.lines().next().map(|l| l.to_string()))
+                .unwrap_or_default();
             defs.push(IndexDef {
                 name: name.to_string(),
                 kind: kind.to_string(),
                 file: rel_path.to_string(),
                 line,
+                signature,
             });
         }
     }
     Ok(defs)
 }
 
-fn find_refs(root: &str, target: &str, max_results: i32) -> Result<String, String> {
-    let root_path = Path::new(root);
-    let index = load_index(root);
-
-    let mut candidate_files: Vec<String> = index.files.keys().cloned().collect();
-    if candidate_files.is_empty() {
-        candidate_files = Vec::new();
-        let ig = parse_gitignore(root);
-        walk_files(root_path, &ig, &[], &mut |_full_path, rel| {
-            candidate_files.push(rel.to_string());
-            true
-        });
-    }
-
-    let mut results: Vec<String> = Vec::new();
-    let max = max_results as usize;
-
-    for rel in &candidate_files {
-        if results.len() >= max {
-            break;
-        }
-        let ext = match extract_extension(rel) {
-            Some(e) => e,
-            None => continue,
-        };
-        let (_, language, _) = match lang_for_ext(ext) {
-            Some(l) => l,
-            None => continue,
-        };
-
-        let abs_path = root_path.join(rel);
-        let source = match std::fs::read_to_string(&abs_path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let tree = match parse_source(&source, &language) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-
-        let remaining = max - results.len();
-        walk_tree_for_refs(
-            tree.root_node(),
-            source.as_bytes(),
-            rel,
-            target,
-            remaining,
-            &mut results,
-        );
-    }
-
-    if results.is_empty() {
-        Ok(String::new())
-    } else {
-        results.truncate(max);
-        Ok(results.join("\n"))
-    }
-}
-
-const REF_NODE_TYPES: &[&str] = &[
-    "identifier",
-    "type_identifier",
-    "field_identifier",
-    "property_identifier",
-];
-
-fn walk_tree_for_refs(
-    node: tree_sitter::Node,
-    source: &[u8],
-    file: &str,
-    target: &str,
-    max: usize,
-    results: &mut Vec<String>,
-) {
-    if results.len() >= max {
-        return;
-    }
-
-    if REF_NODE_TYPES.contains(&node.kind())
-        && let Ok(text) = node.utf8_text(source)
-        && text == target
-    {
-        let line = node.start_position().row + 1;
-        results.push(format!("{}:{}", file, line));
-        if results.len() >= max {
-            return;
-        }
-    }
-
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            walk_tree_for_refs(child, source, file, target, max, results);
-        }
-        if results.len() >= max {
-            return;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
 
-    fn setup_dir() -> tempfile::TempDir {
+    // index_store_dir reads XDG_CONFIG_HOME; parallel tests must not race on it.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct TestDir {
+        dir: tempfile::TempDir,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl TestDir {
+        fn path(&self) -> &std::path::Path {
+            self.dir.path()
+        }
+    }
+
+    fn setup_dir() -> TestDir {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::TempDir::new().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.path().join("xdg")) };
-        dir
+        TestDir { dir, _lock: lock }
     }
 
     #[test]
@@ -736,42 +671,13 @@ const OtherComp = () => <span />;
         .unwrap();
 
         let result = execute_symbols(SymbolsParams {
-            kind: "find".to_string(),
-            name: "foo".to_string(),
-            file: String::new(),
+            query: "foo".to_string(),
             path: root.clone(),
             max_results: 0,
         })
         .unwrap();
         assert!(result.contains("foo"));
         assert!(!result.contains("bar"));
-    }
-
-    #[test]
-    fn test_refs_query() {
-        let dir = setup_dir();
-        std::fs::write(
-            dir.path().join("a.rs"),
-            "fn foo() {} fn bar() { foo(); foo(); }",
-        )
-        .unwrap();
-        let root = dir.path().to_string_lossy().to_string();
-
-        execute_index_build(IndexBuildParams {
-            path: root.clone(),
-            force: false,
-        })
-        .unwrap();
-
-        let result = execute_symbols(SymbolsParams {
-            kind: "refs".to_string(),
-            name: "foo".to_string(),
-            file: String::new(),
-            path: root.clone(),
-            max_results: 0,
-        })
-        .unwrap();
-        assert_eq!(result.lines().count(), 3);
     }
 
     #[test]
@@ -787,16 +693,13 @@ const OtherComp = () => <span />;
         .unwrap();
 
         let result = execute_symbols(SymbolsParams {
-            kind: "list".to_string(),
-            name: String::new(),
-            file: "a.rs".to_string(),
+            query: "alpha".to_string(),
             path: root.clone(),
             max_results: 0,
         })
         .unwrap();
         assert!(result.contains("alpha"));
-        assert!(result.contains("beta"));
-        assert_eq!(result.lines().count(), 2);
+        assert_eq!(result.lines().count(), 1);
     }
 
     #[test]
@@ -806,9 +709,7 @@ const OtherComp = () => <span />;
         let root = dir.path().to_string_lossy().to_string();
 
         let result = execute_symbols(SymbolsParams {
-            kind: "find".to_string(),
-            name: "hello".to_string(),
-            file: String::new(),
+            query: "hello".to_string(),
             path: root.clone(),
             max_results: 0,
         })
@@ -831,9 +732,7 @@ const OtherComp = () => <span />;
         .unwrap();
 
         let result = execute_symbols(SymbolsParams {
-            kind: "find".to_string(),
-            name: "nonexistent".to_string(),
-            file: String::new(),
+            query: "nonexistent".to_string(),
             path: root.clone(),
             max_results: 0,
         })
@@ -858,9 +757,7 @@ const OtherComp = () => <span />;
         .unwrap();
 
         let result = execute_symbols(SymbolsParams {
-            kind: "list".to_string(),
-            name: String::new(),
-            file: "a.rs".to_string(),
+            query: "f".to_string(),
             path: root.clone(),
             max_results: 3,
         })
@@ -904,10 +801,28 @@ const OtherComp = () => <span />;
     }
 
     #[test]
-    fn test_cross_file_refs() {
+    fn test_empty_query() {
         let dir = setup_dir();
         std::fs::write(dir.path().join("a.rs"), "fn foo() {}").unwrap();
-        std::fs::write(dir.path().join("b.rs"), "fn caller() {\n    foo();\n}\n").unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+
+        let result = execute_symbols(SymbolsParams {
+            query: String::new(),
+            path: root.clone(),
+            max_results: 0,
+        })
+        .unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_signature_output() {
+        let dir = setup_dir();
+        std::fs::write(
+            dir.path().join("a.rs"),
+            "fn my_func(x: i32) -> bool { true }",
+        )
+        .unwrap();
         let root = dir.path().to_string_lossy().to_string();
 
         execute_index_build(IndexBuildParams {
@@ -917,25 +832,64 @@ const OtherComp = () => <span />;
         .unwrap();
 
         let result = execute_symbols(SymbolsParams {
-            kind: "refs".to_string(),
-            name: "foo".to_string(),
-            file: String::new(),
+            query: "my_func".to_string(),
             path: root.clone(),
             max_results: 0,
         })
         .unwrap();
+        assert!(result.contains("my_func"));
+        assert!(result.contains("fn my_func(x: i32) -> bool"));
+        let parts: Vec<&str> = result.split('\t').collect();
+        assert_eq!(parts.len(), 4, "expected name, kind, file:line, signature");
+    }
 
+    #[test]
+    fn test_fuzzy_ranking() {
+        let dir = setup_dir();
+        std::fs::write(
+            dir.path().join("a.rs"),
+            "fn exact() {} fn exact_prefix_foo() {} fn contains_exact_x() {}",
+        )
+        .unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+
+        execute_index_build(IndexBuildParams {
+            path: root.clone(),
+            force: false,
+        })
+        .unwrap();
+
+        let result = execute_symbols(SymbolsParams {
+            query: "exact".to_string(),
+            path: root.clone(),
+            max_results: 0,
+        })
+        .unwrap();
         let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(lines.len(), 2, "expected def in a.rs + call in b.rs");
-        assert!(
-            result.contains("a.rs:1"),
-            "def site in a.rs must be found: {}",
-            result
-        );
-        assert!(
-            result.contains("b.rs:2"),
-            "call site in b.rs must be found: {}",
-            result
-        );
+        assert!(lines.len() >= 3);
+        assert!(lines[0].starts_with("exact\t"));
+    }
+
+    #[test]
+    fn test_version_mismatch() {
+        let dir = setup_dir();
+        std::fs::write(dir.path().join("a.rs"), "fn old() {}").unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+
+        execute_index_build(IndexBuildParams {
+            path: root.clone(),
+            force: false,
+        })
+        .unwrap();
+
+        let idx_path = index_store_dir(&root).join("index.json");
+        let mut idx: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&idx_path).unwrap()).unwrap();
+        idx["version"] = serde_json::Value::Number(0.into());
+        std::fs::write(&idx_path, serde_json::to_string(&idx).unwrap()).unwrap();
+
+        let index = load_index(&root);
+        assert_eq!(index.version, INDEX_VERSION);
+        assert!(index.defs.is_empty());
     }
 }

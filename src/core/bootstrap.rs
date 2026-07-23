@@ -104,18 +104,30 @@ pub fn init_with_config(
 pub fn init(
     verbose: bool,
     config_dir: &str,
+    tui: bool,
 ) -> Result<Deps, Box<dyn std::error::Error + Send + Sync>> {
-    let level = if verbose { "debug" } else { "info" };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level))
-        .format_timestamp_secs()
-        .try_init()
-        .ok();
-
     let cfg_dir = if config_dir.is_empty() {
         crate::config::dir()
     } else {
         config_dir.to_string()
     };
+
+    let level = if verbose { "debug" } else { "info" };
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level));
+    builder.format_timestamp_secs();
+    if tui {
+        let log_path = PathBuf::from(&cfg_dir).join("mate.log");
+        let _ = std::fs::create_dir_all(&cfg_dir);
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            builder.target(env_logger::Target::Pipe(Box::new(file)));
+        }
+    }
+    builder.try_init().ok();
 
     let cfg = crate::config::load_from(&cfg_dir)?;
 

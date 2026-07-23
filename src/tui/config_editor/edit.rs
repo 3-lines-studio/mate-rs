@@ -120,6 +120,12 @@ impl super::ConfigScreen {
                     }
                     self.edit = Edit::Text(buf, cursor);
                 }
+                KeyCode::Delete => {
+                    if cursor < buf.len() {
+                        buf.remove(cursor);
+                    }
+                    self.edit = Edit::Text(buf, cursor);
+                }
                 KeyCode::Left => {
                     if cursor > 0 {
                         let prev = buf[..cursor].chars().next_back().unwrap().len_utf8();

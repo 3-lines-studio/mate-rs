@@ -67,7 +67,7 @@ fn run_cmd(args: &[String]) {
     let (verbose, _local, debug_prompts, model, cleaned) = extract_flags(args);
     let prompt = cleaned.join(" ");
 
-    let mut deps = match bootstrap::init(verbose, "") {
+    let mut deps = match bootstrap::init(verbose, "", false) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("mate run: {}", e);
@@ -136,6 +136,7 @@ fn run_cmd(args: &[String]) {
     let mut md_buf = String::new();
 
     let mut events = asession.prompt(&final_prompt);
+    let mut failed = false;
     while let Some(ev) = rt.block_on(events.recv()) {
         match &ev.kind {
             mate::agent::EventKind::TextDelta(delta) => {
@@ -152,7 +153,8 @@ fn run_cmd(args: &[String]) {
             }
             mate::agent::EventKind::Error(msg) => {
                 eprintln!("Error: {}", msg);
-                std::process::exit(1);
+                failed = true;
+                break;
             }
             mate::agent::EventKind::AgentDone(_) => {
                 if render_md && !md_buf.is_empty() {
@@ -165,6 +167,10 @@ fn run_cmd(args: &[String]) {
             }
             _ => {}
         }
+    }
+    mate::herdr::release();
+    if failed {
+        std::process::exit(1);
     }
 }
 
@@ -179,7 +185,7 @@ fn clean_cmd(args: &[String]) {
         .and_then(|i| cleaned.get(i + 1))
         .and_then(|s| s.parse().ok());
 
-    let mut deps = match bootstrap::init(verbose, "") {
+    let mut deps = match bootstrap::init(verbose, "", false) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("mate clean: {}", e);
@@ -266,7 +272,7 @@ fn clean_cmd(args: &[String]) {
 fn default_cmd(args: &[String]) {
     let (verbose, local, debug_prompts, model, _) = extract_flags(args);
 
-    let mut deps = match bootstrap::init(verbose, "") {
+    let mut deps = match bootstrap::init(verbose, "", true) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("mate: {}", e);
