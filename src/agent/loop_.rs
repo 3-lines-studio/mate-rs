@@ -4,6 +4,7 @@ use crate::message::{Message, Role};
 use crate::provider::{ChatRequest, ProviderError, StreamEvent};
 use chrono::Utc;
 use rand::RngExt;
+use std::collections::HashSet;
 use std::time::Duration;
 
 impl super::AgentSession {
@@ -153,6 +154,7 @@ impl super::AgentSession {
         });
         msgs.extend_from_slice(ancestry_msgs);
         msgs.extend_from_slice(&self.working_messages);
+        let msgs = sanitize_tool_messages(msgs);
 
         ChatRequest {
             messages: msgs,
@@ -283,6 +285,38 @@ impl super::AgentSession {
                     }
                 }
             }
+
+            let before = result.tool_calls.len();
+            result
+                .tool_calls
+                .retain(|tc| tool_args_valid(&tc.arguments));
+            if result.tool_calls.len() < before {
+                log::warn!(
+                    "dropped {} tool call(s) with invalid JSON arguments",
+                    before - result.tool_calls.len()
+                );
+            }
+            if before > 0
+                && result.tool_calls.is_empty()
+                && result.content.is_empty()
+                && attempt < MAX_ATTEMPTS - 1
+            {
+                let shift = 1u64 << attempt;
+                let delay = Duration::from_secs(2 * shift).min(MAX_DELAY);
+                let jitter = delay.as_secs_f64() * 0.25 * (2.0 * rand::rng().random::<f64>() - 1.0);
+                let delay = Duration::from_secs_f64(delay.as_secs_f64() + jitter);
+                let _ = events
+                    .send(Event::retry_ev(&format!(
+                        "Attempt {}/{} failed: truncated tool arguments — retrying in {}",
+                        attempt + 1,
+                        MAX_ATTEMPTS,
+                        format_duration(delay)
+                    )))
+                    .await;
+                tokio::time::sleep(delay).await;
+                continue 'attempt;
+            }
+
             return Ok(result);
         }
 
@@ -359,6 +393,48 @@ fn working_has_progress(messages: &[Message]) -> bool {
     messages.iter().any(|m| m.role != Role::User)
 }
 
+fn tool_args_valid(args: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(args).is_ok()
+}
+
+fn sanitize_tool_messages(msgs: Vec<Message>) -> Vec<Message> {
+    let mut drop_ids: HashSet<String> = HashSet::new();
+    for m in &msgs {
+        for tc in &m.tool_calls {
+            if !tool_args_valid(&tc.function.arguments) {
+                drop_ids.insert(tc.id.clone());
+            }
+        }
+    }
+    if drop_ids.is_empty() {
+        return msgs;
+    }
+
+    log::warn!(
+        "stripping {} invalid tool call(s) from request history",
+        drop_ids.len()
+    );
+
+    msgs.into_iter()
+        .filter_map(|mut m| {
+            if !m.tool_calls.is_empty() {
+                m.tool_calls.retain(|tc| !drop_ids.contains(&tc.id));
+                if m.tool_calls.is_empty()
+                    && m.content.is_empty()
+                    && m.reasoning_content.is_empty()
+                    && m.reasoning_details.is_empty()
+                {
+                    return None;
+                }
+            }
+            if m.role == Role::Tool && drop_ids.contains(&m.tool_call_id) {
+                return None;
+            }
+            Some(m)
+        })
+        .collect()
+}
+
 fn assistant_msg(
     content: String,
     reasoning_content: String,
@@ -373,5 +449,117 @@ fn assistant_msg(
         tool_call_id: String::new(),
         name: String::new(),
         tool_duration: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message::{ToolCall, ToolCallFunction};
+    use crate::provider::StreamToolCall;
+
+    fn msg_assistant_tools(calls: Vec<(&str, &str, &str)>) -> Message {
+        Message {
+            role: Role::Assistant,
+            content: String::new(),
+            reasoning_content: String::new(),
+            reasoning_details: vec![],
+            tool_calls: calls
+                .into_iter()
+                .map(|(id, name, args)| ToolCall {
+                    id: id.into(),
+                    call_type: "function".into(),
+                    function: ToolCallFunction {
+                        name: name.into(),
+                        arguments: args.into(),
+                    },
+                })
+                .collect(),
+            tool_call_id: String::new(),
+            name: String::new(),
+            tool_duration: String::new(),
+        }
+    }
+
+    fn msg_tool(id: &str, name: &str, content: &str) -> Message {
+        Message {
+            role: Role::Tool,
+            content: content.into(),
+            reasoning_content: String::new(),
+            reasoning_details: vec![],
+            tool_calls: vec![],
+            tool_call_id: id.into(),
+            name: name.into(),
+            tool_duration: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_tool_args_valid() {
+        assert!(tool_args_valid(r#"{"command":"ls"}"#));
+        assert!(tool_args_valid("{}"));
+        assert!(!tool_args_valid(r#"{"command":"cd apps"#));
+        assert!(!tool_args_valid(""));
+    }
+
+    #[test]
+    fn test_sanitize_drops_invalid_tool_and_result() {
+        let msgs = vec![
+            msg_assistant_tools(vec![
+                ("c1", "edit_file", r#"{"path":"a.go"}"#),
+                (
+                    "c2",
+                    "bash",
+                    r#"{"command":"cd apps/worker-go && go build ./... 2>"#,
+                ),
+            ]),
+            msg_tool("c1", "edit_file", "ok"),
+            msg_tool("c2", "bash", "invalid args"),
+        ];
+        let out = sanitize_tool_messages(msgs);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].tool_calls.len(), 1);
+        assert_eq!(out[0].tool_calls[0].id, "c1");
+        assert_eq!(out[1].tool_call_id, "c1");
+    }
+
+    #[test]
+    fn test_sanitize_drops_assistant_when_only_invalid_tools() {
+        let msgs = vec![
+            msg_assistant_tools(vec![("c1", "bash", r#"{"command":"x"#)]),
+            msg_tool("c1", "bash", "err"),
+            Message {
+                role: Role::User,
+                content: "continue".into(),
+                reasoning_content: String::new(),
+                reasoning_details: vec![],
+                tool_calls: vec![],
+                tool_call_id: String::new(),
+                name: String::new(),
+                tool_duration: String::new(),
+            },
+        ];
+        let out = sanitize_tool_messages(msgs);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, Role::User);
+    }
+
+    #[test]
+    fn test_filter_invalid_stream_tool_calls() {
+        let mut calls = vec![
+            StreamToolCall {
+                id: "1".into(),
+                name: "bash".into(),
+                arguments: r#"{"command":"ls"}"#.into(),
+            },
+            StreamToolCall {
+                id: "2".into(),
+                name: "bash".into(),
+                arguments: r#"{"command":"cd apps/worker-go && go build ./... 2>"#.into(),
+            },
+        ];
+        calls.retain(|tc| tool_args_valid(&tc.arguments));
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "1");
     }
 }

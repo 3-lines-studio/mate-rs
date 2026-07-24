@@ -8,9 +8,20 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
+fn fold_byte(b: u8) -> u8 {
+    if b.is_ascii_uppercase() { b + 32 } else { b }
+}
+
+fn is_alnum_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+}
+
 pub fn fuzzy_score(query: &str, hay: &str) -> Option<i64> {
     if query.is_empty() {
         return Some(0);
+    }
+    if query.is_ascii() && hay.is_ascii() {
+        return fuzzy_score_ascii(query.as_bytes(), hay.as_bytes());
     }
     let q: Vec<char> = query.to_lowercase().chars().collect();
     let h: Vec<char> = hay.to_lowercase().chars().collect();
@@ -26,6 +37,37 @@ pub fn fuzzy_score(query: &str, hay: &str) -> Option<i64> {
             first.get_or_insert(hi);
             score += if prev_matched { 16 } else { 1 };
             if hi == 0 || !h[hi - 1].is_alphanumeric() {
+                score += 8;
+            }
+            prev_matched = true;
+            qi += 1;
+        } else {
+            prev_matched = false;
+        }
+    }
+    if qi != q.len() {
+        return None;
+    }
+    if let Some(f) = first {
+        score -= (f as i64).min(20);
+    }
+    Some(score)
+}
+
+fn fuzzy_score_ascii(q: &[u8], h: &[u8]) -> Option<i64> {
+    if q.len() > h.len() {
+        return None;
+    }
+    let mut qi = 0usize;
+    let mut score: i64 = 0;
+    let mut prev_matched = false;
+    let mut first: Option<usize> = None;
+    for (hi, &hb) in h.iter().enumerate() {
+        let hc = fold_byte(hb);
+        if qi < q.len() && hc == fold_byte(q[qi]) {
+            first.get_or_insert(hi);
+            score += if prev_matched { 16 } else { 1 };
+            if hi == 0 || !is_alnum_byte(h[hi - 1]) {
                 score += 8;
             }
             prev_matched = true;

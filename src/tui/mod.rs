@@ -51,13 +51,14 @@ pub struct App {
 
 impl App {
     pub fn new(deps: Deps) -> Self {
-        let chat = ChatScreen::new(
+        let mut chat = ChatScreen::new(
             deps.cwd.clone(),
             deps.templates.clone(),
             deps.config.tui.show_thinking,
             deps.config.tui.tools_expanded,
             deps.config.tui.show_subagent_calls,
         );
+        chat.start_file_reindex();
         let config_screen = ConfigScreen::new(deps.config_dir.clone());
         App {
             state: AppState::SessionList,
@@ -81,6 +82,7 @@ impl App {
         self.session_list.load(&mut self.deps.store);
 
         while !self.should_quit {
+            self.chat.poll_files_index();
             terminal.draw(|f| self.draw(f))?;
 
             if self.chat.waiting || self.chat.compacting {

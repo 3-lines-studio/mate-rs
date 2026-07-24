@@ -103,32 +103,33 @@ impl ChatScreen {
     pub fn filter_file_dropdown(&mut self, query: &str) {
         self.ensure_files_loaded();
         let q = query.rsplit_once('@').map(|(_, a)| a).unwrap_or(query);
-        let all = self.all_files.clone();
+        const LIMIT: usize = 64;
         if q.is_empty() {
-            self.file_dropdown.items = all
-                .into_iter()
+            self.file_dropdown.items = self
+                .all_files
+                .iter()
+                .take(LIMIT)
                 .map(|f| LabeledItem {
                     label: f.clone(),
-                    value: f,
+                    value: f.clone(),
                 })
                 .collect();
         } else {
-            let mut scored: Vec<(i64, LabeledItem)> = all
+            let mut scored: Vec<(i64, &str)> = Vec::new();
+            for f in &self.all_files {
+                if let Some(s) = fuzzy_score(q, f) {
+                    scored.push((s, f.as_str()));
+                }
+            }
+            scored.sort_by_key(|b| std::cmp::Reverse(b.0));
+            self.file_dropdown.items = scored
                 .into_iter()
-                .filter_map(|f| {
-                    fuzzy_score(q, &f).map(|s| {
-                        (
-                            s,
-                            LabeledItem {
-                                label: f.clone(),
-                                value: f,
-                            },
-                        )
-                    })
+                .take(LIMIT)
+                .map(|(_, f)| LabeledItem {
+                    label: f.to_string(),
+                    value: f.to_string(),
                 })
                 .collect();
-            scored.sort_by_key(|b| std::cmp::Reverse(b.0));
-            self.file_dropdown.items = scored.into_iter().map(|(_, t)| t).collect();
         }
         if self.file_dropdown.selected >= self.file_dropdown.items.len() {
             self.file_dropdown.selected = self.file_dropdown.items.len().saturating_sub(1);

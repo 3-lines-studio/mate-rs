@@ -68,6 +68,7 @@ pub struct ChatScreen {
 
     pub all_files: Vec<String>,
     pub files_loaded: bool,
+    files_index_rx: Option<std::sync::mpsc::Receiver<Vec<String>>>,
     pub all_template_items: Vec<super::chat_dropdowns::TemplateItem>,
     pub templates: Vec<Template>,
     pub tree_items: Vec<super::chat_dropdowns::TreeItem>,
@@ -142,6 +143,7 @@ impl ChatScreen {
 
             all_files: Vec::new(),
             files_loaded: false,
+            files_index_rx: None,
             all_template_items: tmpl_items,
             templates,
             tree_items: Vec::new(),
@@ -224,15 +226,48 @@ impl ChatScreen {
         self.abort_handle = None;
         finish_bot_message(&mut self.live_blocks, &mut self.messages, &self.cwd);
         self.waiting = false;
-        self.files_loaded = false;
+        self.start_file_reindex();
         self.render_messages();
     }
 
-    pub fn ensure_files_loaded(&mut self) {
-        if !self.files_loaded {
-            self.all_files = index_files(&self.cwd);
-            self.files_loaded = true;
+    pub fn start_file_reindex(&mut self) {
+        let cwd = self.cwd.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(index_files(&cwd));
+        });
+        self.files_index_rx = Some(rx);
+    }
+
+    pub fn poll_files_index(&mut self) {
+        let Some(rx) = &self.files_index_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(files) => {
+                self.all_files = files;
+                self.files_loaded = true;
+                self.files_index_rx = None;
+                if self.active_modal == Modal::File {
+                    let query = self.textarea_value().to_string();
+                    self.filter_file_dropdown(&query);
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.files_index_rx = None;
+            }
         }
+    }
+
+    pub fn ensure_files_loaded(&mut self) {
+        if self.files_loaded {
+            return;
+        }
+        if self.files_index_rx.is_none() {
+            self.start_file_reindex();
+        }
+        self.poll_files_index();
     }
 
     pub fn render(&mut self, f: &mut Frame) {

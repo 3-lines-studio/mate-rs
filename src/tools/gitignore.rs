@@ -210,6 +210,14 @@ fn parse_gitignore_file(path: &str, dir: &str) -> Vec<GitignoreRule> {
 }
 
 impl GitignoreMatcher {
+    pub(crate) fn new() -> Self {
+        GitignoreMatcher { rules: Vec::new() }
+    }
+
+    pub(crate) fn add_file(&mut self, path: &str, dir: &str) {
+        self.rules.extend(parse_gitignore_file(path, dir));
+    }
+
     pub fn is_ignored(&self, rel_path: &str, is_dir: bool) -> bool {
         let mut ignored = false;
         for rule in &self.rules {

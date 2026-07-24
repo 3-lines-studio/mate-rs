@@ -1131,3 +1131,61 @@ async fn test_sse_error_in_chunk() {
     }
     assert!(got_error);
 }
+
+#[tokio::test]
+async fn test_sse_tool_call_trailing_buffer_without_newline() {
+    let mock_server = MockServer::start().await;
+
+    // Final tool-call chunk has no trailing newline; must still be parsed.
+    // Args arrive as two delta fragments: {"cmd"  +  ":"ls"}  =>  {"cmd":"ls"}
+    let body = concat!(
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"cmd"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":\"ls\"}"}}]}}]}"#,
+    );
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body))
+        .mount(&mock_server)
+        .await;
+
+    let c = Client::new(
+        &mock_server.uri(),
+        "m",
+        "k",
+        ModelProfile {
+            context_window: 8000,
+            max_output_tokens: 4096,
+            ..Default::default()
+        },
+    );
+
+    let req = ChatRequest {
+        model: String::new(),
+        messages: vec![],
+        tools: vec![],
+        stream: false,
+        max_tokens: 0,
+        stream_options: None,
+        reasoning_effort: String::new(),
+        reasoning: None,
+        cache_control: None,
+        session_id: String::new(),
+    };
+
+    let mut rx = c.chat(req).await.unwrap();
+
+    let mut got = false;
+    while let Some(ev) = rx.recv().await {
+        if let StreamEvent::ToolCall { call } = &ev
+            && call.name == "bash"
+            && call.arguments == "{\"cmd\":\"ls\"}"
+        {
+            got = true;
+        }
+    }
+    assert!(
+        got,
+        "tool call args lost when final SSE line has no trailing newline"
+    );
+}
