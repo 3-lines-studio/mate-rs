@@ -58,6 +58,7 @@ pub struct ModelProfile {
     pub cached_input_price: f64,
     pub output_price: f64,
     pub prompt_cache: bool,
+    pub cache_ttl: String,
 }
 
 impl Default for ModelProfile {
@@ -71,6 +72,7 @@ impl Default for ModelProfile {
             cached_input_price: 0.0,
             output_price: 0.0,
             prompt_cache: false,
+            cache_ttl: String::new(),
         }
     }
 }

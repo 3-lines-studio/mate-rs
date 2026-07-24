@@ -168,7 +168,7 @@ fn run_cmd(args: &[String]) {
             _ => {}
         }
     }
-    mate::herdr::release();
+    mate::herdr::shutdown();
     if failed {
         std::process::exit(1);
     }

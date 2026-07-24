@@ -40,6 +40,7 @@ const MODEL_FIELDS: &[(&str, FieldKind)] = &[
     ("cached_input_price", FieldKind::F64),
     ("output_price", FieldKind::F64),
     ("prompt_cache", FieldKind::Bool),
+    ("cache_ttl", FieldKind::Text),
 ];
 
 const SUBAGENT_FIELDS: &[(&str, FieldKind)] = &[
@@ -232,6 +233,7 @@ impl super::ConfigScreen {
                 "cached_input_price" => format_f64(m.cached_input_price),
                 "output_price" => format_f64(m.output_price),
                 "prompt_cache" => m.prompt_cache.to_string(),
+                "cache_ttl" => m.cache_ttl.clone(),
                 _ => String::new(),
             }
         } else {
@@ -281,6 +283,7 @@ impl super::ConfigScreen {
                         .parse::<bool>()
                         .map_err(|_| format!("invalid bool: {}", value))?
                 }
+                "cache_ttl" => m.cache_ttl = value.to_string(),
                 _ => {}
             }
         }

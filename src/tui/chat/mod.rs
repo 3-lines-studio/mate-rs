@@ -269,7 +269,11 @@ pub(crate) fn shorten_cwd_string(cwd: &str) -> String {
 }
 
 pub(super) fn fmt_cost(c: f64) -> String {
-    format!("${:.2}", c)
+    if c < 0.01 {
+        format!("${:.4}", c)
+    } else {
+        format!("${:.2}", c)
+    }
 }
 
 pub(super) fn fit_height(area: Rect, top: u16, h: u16) -> Option<u16> {
@@ -284,6 +288,14 @@ pub(super) fn fit_height(area: Rect, top: u16, h: u16) -> Option<u16> {
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn fmt_cost_precision() {
+        assert_eq!(fmt_cost(0.0012), "$0.0012");
+        assert_eq!(fmt_cost(0.0099), "$0.0099");
+        assert_eq!(fmt_cost(0.01), "$0.01");
+        assert_eq!(fmt_cost(1.234), "$1.23");
+    }
 
     fn render_to(screen: &mut ChatScreen, w: u16, h: u16) {
         let backend = TestBackend::new(w, h);

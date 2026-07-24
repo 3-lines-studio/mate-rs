@@ -10,14 +10,14 @@ mod write_file;
 
 use crate::message::ToolDef;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Tool {
     pub name: String,
     pub description: String,
-    pub parameters: HashMap<String, Value>,
+    pub parameters: BTreeMap<String, Value>,
     #[allow(clippy::type_complexity)]
     pub execute: Arc<
         dyn Fn(
@@ -95,15 +95,17 @@ impl Default for Registry {
 pub(crate) fn object_schema(
     props: &[(&str, serde_json::Value)],
     required: &[&str],
-) -> std::collections::HashMap<String, serde_json::Value> {
-    let mut map: std::collections::HashMap<String, serde_json::Value> =
-        std::collections::HashMap::new();
-    map.insert("type".to_string(), serde_json::json!("object"));
-    let mut properties = std::collections::HashMap::new();
+) -> BTreeMap<String, serde_json::Value> {
+    let mut properties = serde_json::Map::new();
     for (k, v) in props {
-        properties.insert(k.to_string(), v.clone());
+        properties.insert((*k).to_string(), v.clone());
     }
-    map.insert("properties".to_string(), serde_json::json!(properties));
+    let mut map = BTreeMap::new();
+    map.insert("type".to_string(), serde_json::json!("object"));
+    map.insert(
+        "properties".to_string(),
+        serde_json::Value::Object(properties),
+    );
     map.insert("required".to_string(), serde_json::json!(required));
     map
 }
@@ -147,7 +149,7 @@ fn truncate_output(s: String) -> String {
 pub fn define_tool<P, F, Fut>(
     name: &str,
     description: &str,
-    params_schema: HashMap<String, Value>,
+    params_schema: BTreeMap<String, Value>,
     f: F,
 ) -> Tool
 where
@@ -196,7 +198,7 @@ mod tests {
         let tool = Tool {
             name: "test".to_string(),
             description: "desc".to_string(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("ok".to_string()) })),
         };
         assert!(r.register(tool).is_ok());
@@ -209,14 +211,14 @@ mod tests {
         let tool = Tool {
             name: "dup".to_string(),
             description: String::new(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("ok".to_string()) })),
         };
         let _ = r.register(tool);
         let tool2 = Tool {
             name: "dup".to_string(),
             description: String::new(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("ok".to_string()) })),
         };
         assert!(r.register(tool2).is_err());
@@ -228,7 +230,7 @@ mod tests {
         let tool = Tool {
             name: "findme".to_string(),
             description: "hello".to_string(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("ok".to_string()) })),
         };
         let _ = r.register(tool);
@@ -244,7 +246,7 @@ mod tests {
         let make_tool = |n: &str| Tool {
             name: n.to_string(),
             description: String::new(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("ok".to_string()) })),
         };
         let _ = r.register(make_tool("b"));
@@ -259,7 +261,7 @@ mod tests {
         let tool = Tool {
             name: "x".to_string(),
             description: String::new(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("ok".to_string()) })),
         };
         let _ = r.register(tool);
@@ -271,11 +273,7 @@ mod tests {
     #[test]
     fn test_tool_defs() {
         let mut r = Registry::new();
-        let mut params = HashMap::new();
-        params.insert("type".to_string(), serde_json::json!("object"));
-        let mut props = HashMap::new();
-        props.insert("command".to_string(), serde_json::json!({"type": "string"}));
-        params.insert("properties".to_string(), serde_json::json!(props));
+        let params = object_schema(&[("command", serde_json::json!({"type": "string"}))], &[]);
 
         let tool = Tool {
             name: "bash".to_string(),
@@ -294,6 +292,43 @@ mod tests {
     fn test_tool_defs_empty() {
         let r = Registry::new();
         assert!(r.tool_defs().is_empty());
+    }
+
+    #[test]
+    fn test_object_schema_key_order_stable() {
+        let schema = object_schema(
+            &[
+                ("z_last", serde_json::json!({"type": "string"})),
+                ("a_first", serde_json::json!({"type": "integer"})),
+                ("m_mid", serde_json::json!({"type": "boolean"})),
+            ],
+            &["a_first", "z_last"],
+        );
+        let json = serde_json::to_string(&schema).unwrap();
+        let expected = serde_json::to_string(&object_schema(
+            &[
+                ("z_last", serde_json::json!({"type": "string"})),
+                ("a_first", serde_json::json!({"type": "integer"})),
+                ("m_mid", serde_json::json!({"type": "boolean"})),
+            ],
+            &["a_first", "z_last"],
+        ))
+        .unwrap();
+        assert_eq!(json, expected);
+        assert_eq!(
+            json,
+            r#"{"properties":{"a_first":{"type":"integer"},"m_mid":{"type":"boolean"},"z_last":{"type":"string"}},"required":["a_first","z_last"],"type":"object"}"#
+        );
+    }
+
+    #[test]
+    fn test_standard_tool_defs_serialize_stable() {
+        let a = Registry::standard().tool_defs();
+        let b = Registry::standard().tool_defs();
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
     }
 
     #[test]
@@ -327,7 +362,7 @@ mod tests {
         let tool = define_tool(
             "greet",
             "says hello",
-            HashMap::new(),
+            BTreeMap::new(),
             |p: GreetParams| async move { Ok(format!("hello {}", p.name)) },
         );
 
@@ -343,7 +378,7 @@ mod tests {
         let tool = define_tool(
             "greet",
             "says hello",
-            HashMap::new(),
+            BTreeMap::new(),
             |p: GreetParams| async move { Ok(format!("hello {}", p.name)) },
         );
 
@@ -362,7 +397,7 @@ mod tests {
         let tool = define_tool(
             "ctx",
             "test",
-            HashMap::new(),
+            BTreeMap::new(),
             |p: ContextParams| async move { Ok(format!("got: {}", p.val)) },
         );
 
@@ -377,7 +412,7 @@ mod tests {
         let tool = Tool {
             name: "reg_test".to_string(),
             description: "registry test".to_string(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
             execute: Arc::new(|_| Box::pin(async { Ok("found".to_string()) })),
         };
         let _ = r.register(tool);
@@ -458,7 +493,7 @@ mod tests {
         let tool = define_tool(
             "big",
             "returns big",
-            HashMap::new(),
+            BTreeMap::new(),
             |p: ContextParams| async move { Ok(p.val) },
         );
         let huge = "x".repeat(MAX_TOOL_OUTPUT_BYTES + 100);
@@ -474,7 +509,7 @@ mod tests {
         let tool = define_tool(
             "small",
             "returns small",
-            HashMap::new(),
+            BTreeMap::new(),
             |p: ContextParams| async move { Ok(format!("ok {}", p.val)) },
         );
         let result = (tool.execute)(serde_json::json!({"val": "hi"}))

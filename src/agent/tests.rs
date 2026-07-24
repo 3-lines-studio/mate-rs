@@ -5,7 +5,7 @@ use crate::provider::{
 use crate::session::Session;
 use crate::session::store::Store;
 use crate::tools::Registry;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
@@ -94,13 +94,7 @@ fn dummy_agent() -> AgentSession {
         "k",
         ModelProfile {
             context_window: 8000,
-            max_output_tokens: 0,
-            reasoning_effort: String::new(),
-            open_router: false,
-            input_price: 0.0,
-            cached_input_price: 0.0,
-            output_price: 0.0,
-            prompt_cache: false,
+            ..Default::default()
         },
     ));
     let registry = Arc::new(Registry::new());
@@ -145,7 +139,7 @@ fn dummy_tool(name: &str, result: &str) -> crate::tools::Tool {
     crate::tools::Tool {
         name: name.to_string(),
         description: String::new(),
-        parameters: HashMap::new(),
+        parameters: BTreeMap::new(),
         execute: Arc::new(move |_| {
             let result = result.clone();
             Box::pin(async move { Ok(result) })
@@ -317,5 +311,215 @@ async fn test_delegate_subagent_with_tool_round() {
         delegate_result.contains("summarized file contents"),
         "delegate result was: {:?}",
         delegate_result
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_commits_partial_turn_after_each_tool_round() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let store = Arc::new(TokioMutex::new(
+        Store::new(&dir.path().to_string_lossy()).unwrap(),
+    ));
+
+    let responses = vec![
+        vec![
+            se_tool(StreamToolCall {
+                id: "c1".into(),
+                name: "echo".into(),
+                arguments: "{}".into(),
+            }),
+            se_finish("tool_calls"),
+        ],
+        vec![
+            se_tool(StreamToolCall {
+                id: "c2".into(),
+                name: "echo".into(),
+                arguments: "{}".into(),
+            }),
+            se_finish("tool_calls"),
+        ],
+        vec![se("text_delta", "all done"), se_finish("stop")],
+    ];
+    let client = MockClient::new(responses);
+
+    let mut registry = Registry::new();
+    let _ = registry.register(dummy_tool("echo", "ok"));
+
+    let mut agent = AgentSession::new(
+        store.clone(),
+        dummy_session(),
+        client,
+        Arc::new(registry),
+        "sys".to_string(),
+        5,
+        "/tmp".to_string(),
+    );
+
+    let mut rx = agent.prompt("do work");
+    while let Some(ev) = rx.recv().await {
+        if matches!(&ev.kind, EventKind::AgentDone(_)) {
+            break;
+        }
+    }
+
+    let mut store = store.lock().await;
+    let index = store.turn_index("s1").unwrap();
+    let mains: Vec<_> = index.iter().filter(|m| m.subagent.is_empty()).collect();
+    assert_eq!(
+        mains.len(),
+        3,
+        "expected 2 tool partials + final, got {index:?}"
+    );
+    assert_eq!(mains[0].parent_id, "");
+    assert_eq!(mains[1].parent_id, mains[0].id);
+    assert_eq!(mains[2].parent_id, mains[1].id);
+
+    let t0 = store.load_turn("s1", &mains[0].id).unwrap();
+    assert!(
+        t0.messages
+            .iter()
+            .any(|m| m.role == crate::message::Role::User)
+    );
+    assert!(
+        t0.messages
+            .iter()
+            .any(|m| m.role == crate::message::Role::Tool)
+    );
+    assert!(t0.messages.iter().any(|m| !m.tool_calls.is_empty()));
+
+    let t1 = store.load_turn("s1", &mains[1].id).unwrap();
+    assert!(
+        t1.messages
+            .iter()
+            .any(|m| m.role == crate::message::Role::Tool)
+    );
+    assert!(
+        !t1.messages
+            .iter()
+            .any(|m| m.role == crate::message::Role::User)
+    );
+
+    let t2 = store.load_turn("s1", &mains[2].id).unwrap();
+    assert!(t2.messages.iter().any(|m| m.content.contains("all done")));
+
+    let meta = store.load("s1").unwrap();
+    assert_eq!(meta.current_turn, mains[2].id);
+    assert_eq!(meta.turn_count, 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_partial_turn_survives_error_for_continue() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let store = Arc::new(TokioMutex::new(
+        Store::new(&dir.path().to_string_lossy()).unwrap(),
+    ));
+
+    let responses = vec![
+        vec![
+            se_tool(StreamToolCall {
+                id: "c1".into(),
+                name: "echo".into(),
+                arguments: "{}".into(),
+            }),
+            se_finish("tool_calls"),
+        ],
+        vec![
+            se("text_delta", "partial"),
+            StreamEvent::Error {
+                error: ProviderError {
+                    status_code: 500,
+                    body: "boom".into(),
+                },
+            },
+        ],
+    ];
+    let client = MockClient::new(responses);
+
+    let mut registry = Registry::new();
+    let _ = registry.register(dummy_tool("echo", "tool-result-1"));
+
+    let mut agent = AgentSession::new(
+        store.clone(),
+        dummy_session(),
+        client,
+        Arc::new(registry),
+        "sys".to_string(),
+        5,
+        "/tmp".to_string(),
+    );
+
+    let mut rx = agent.prompt("start work");
+    let mut saw_retry_or_error = false;
+    while let Some(ev) = rx.recv().await {
+        match &ev.kind {
+            EventKind::RetryAvailable(_) | EventKind::Error(_) => {
+                saw_retry_or_error = true;
+                break;
+            }
+            EventKind::AgentDone(_) => break,
+            _ => {}
+        }
+    }
+    assert!(saw_retry_or_error);
+
+    {
+        let mut store = store.lock().await;
+        let index = store.turn_index("s1").unwrap();
+        let mains: Vec<_> = index.iter().filter(|m| m.subagent.is_empty()).collect();
+        assert_eq!(mains.len(), 1, "tool round must be committed before error");
+        let t0 = store.load_turn("s1", &mains[0].id).unwrap();
+        assert!(
+            t0.messages
+                .iter()
+                .any(|m| m.content.contains("tool-result-1"))
+        );
+        let meta = store.load("s1").unwrap();
+        assert_eq!(meta.current_turn, mains[0].id);
+    }
+
+    let cont_responses = vec![vec![se("text_delta", "continued"), se_finish("stop")]];
+    let cont_client = MockClient::new(cont_responses);
+    let mut registry = Registry::new();
+    let _ = registry.register(dummy_tool("echo", "ok"));
+    let sess = store.lock().await.load("s1").unwrap();
+    let mut agent = AgentSession::new(
+        store.clone(),
+        sess,
+        cont_client,
+        Arc::new(registry),
+        "sys".to_string(),
+        5,
+        "/tmp".to_string(),
+    );
+
+    let mut rx = agent.prompt("continue");
+    let mut final_text = String::new();
+    while let Some(ev) = rx.recv().await {
+        if let EventKind::TextDelta(delta) = &ev.kind {
+            final_text.push_str(delta);
+        }
+        if matches!(&ev.kind, EventKind::AgentDone(_)) {
+            break;
+        }
+    }
+    assert_eq!(final_text, "continued");
+
+    let mut store = store.lock().await;
+    let meta = store.load("s1").unwrap();
+    let ancestry = store.ancestry("s1", &meta.current_turn).unwrap();
+    assert_eq!(ancestry.len(), 2);
+    let flat: String = ancestry
+        .iter()
+        .flat_map(|t| t.messages.iter())
+        .map(|m| m.content.clone())
+        .collect::<Vec<_>>()
+        .join("|");
+    assert!(
+        flat.contains("tool-result-1"),
+        "continue must see prior tool result: {flat}"
+    );
+    assert!(
+        flat.contains("continued"),
+        "continue must commit final text: {flat}"
     );
 }

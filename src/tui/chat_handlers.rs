@@ -158,7 +158,7 @@ pub fn handle_agent_event(
     total_cost: &mut f64,
     retry_available: &mut bool,
     finished: &mut bool,
-    active_session: Option<&crate::agent::AgentSession>,
+    _active_session: Option<&crate::agent::AgentSession>,
 ) {
     use crate::agent::EventKind;
     match &event.kind {
@@ -244,10 +244,14 @@ pub fn handle_agent_event(
             }
         }
         EventKind::Usage(usage) if event.subagent.is_empty() => {
-            *total_tokens = usage.total_tokens;
-            *cache_hit_tokens = usage.prompt_cache_hit_tokens;
-            if let Some(asession) = active_session {
-                *total_cost = asession.sess().cost;
+            if usage.total_tokens > 0 {
+                *total_tokens = usage.total_tokens;
+            }
+            if usage.prompt_cache_hit_tokens > 0 {
+                *cache_hit_tokens = usage.prompt_cache_hit_tokens;
+            }
+            if usage.cost > 0.0 {
+                *total_cost += usage.cost;
             }
         }
         _ => {}
@@ -445,5 +449,68 @@ mod tests {
         assert_eq!(segs[0].children.len(), 1);
         assert_eq!(segs[0].children[0].children.len(), 1);
         assert_eq!(segs[0].children[0].children[0].tool_name, "read_file");
+    }
+
+    #[test]
+    fn usage_events_accumulate_cost_and_ignore_zero_token_delta() {
+        let mut live_blocks = Vec::new();
+        let mut messages = Vec::new();
+        let mut total_tokens = 100;
+        let mut cache_hit_tokens = 10;
+        let mut total_cost = 0.05;
+        let mut retry_available = false;
+        let mut finished = false;
+
+        handle_agent_event(
+            &Event::usage_ev(crate::provider::Usage {
+                prompt_tokens: 20,
+                completion_tokens: 5,
+                total_tokens: 200,
+                prompt_cache_hit_tokens: 15,
+                prompt_tokens_details: None,
+                completion_tokens_details: None,
+                cost: 0.0123,
+            }),
+            &mut live_blocks,
+            &mut messages,
+            ".",
+            false,
+            false,
+            &mut total_tokens,
+            &mut cache_hit_tokens,
+            &mut total_cost,
+            &mut retry_available,
+            &mut finished,
+            None,
+        );
+        assert_eq!(total_tokens, 200);
+        assert_eq!(cache_hit_tokens, 15);
+        assert!((total_cost - 0.0623).abs() < 1e-9);
+
+        handle_agent_event(
+            &Event::usage_ev(crate::provider::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                prompt_cache_hit_tokens: 0,
+                prompt_tokens_details: None,
+                completion_tokens_details: None,
+                cost: 0.004,
+            }),
+            &mut live_blocks,
+            &mut messages,
+            ".",
+            false,
+            false,
+            &mut total_tokens,
+            &mut cache_hit_tokens,
+            &mut total_cost,
+            &mut retry_available,
+            &mut finished,
+            None,
+        );
+        assert_eq!(total_tokens, 200);
+        assert_eq!(cache_hit_tokens, 15);
+        assert!((total_cost - 0.0663).abs() < 1e-9);
     }
 }

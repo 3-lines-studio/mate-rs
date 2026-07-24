@@ -81,6 +81,7 @@ pub struct AgentSession {
     system_msg: String,
     max_rounds: i32,
     cwd: String,
+    api_session_id: String,
 
     cached_tool_defs: Vec<ToolDef>,
 
@@ -135,11 +136,12 @@ impl AgentSession {
         cwd: String,
     ) -> Self {
         let now = chrono::Local::now();
-        let date_str = now.format("%Y-%m-%d (%A)").to_string();
+        let date_str = now.format("%Y-%m-%d").to_string();
         let system_msg = format!("CWD: {}\nDate: {}\n\n{}", cwd, date_str, system_prompt);
         let cached_tool_defs = registry.tool_defs();
         let compacted_summary = sess.compacted_summary.clone();
         let compacted_up_to = sess.compacted_up_to.clone();
+        let api_session_id = sess.id.clone();
 
         AgentSession {
             store,
@@ -149,6 +151,7 @@ impl AgentSession {
             system_msg,
             max_rounds,
             cwd,
+            api_session_id,
             cached_tool_defs,
             working_messages: Vec::new(),
             compaction: types::CompactionState {
@@ -172,8 +175,10 @@ impl AgentSession {
         def: &SubagentDef,
         max_rounds: i32,
         cwd: String,
+        tool_call_id: &str,
     ) -> Self {
         let system_msg = format!("CWD: {}\n\n{}", cwd, def.system_prompt);
+        let api_session_id = format!("{}:sub:{}:{}", sess_id, def.id, tool_call_id);
         AgentSession {
             store,
             sess: Session {
@@ -198,6 +203,7 @@ impl AgentSession {
             system_msg,
             max_rounds,
             cwd,
+            api_session_id,
             cached_tool_defs: def.registry.tool_defs(),
             working_messages: Vec::new(),
             compaction: types::CompactionState {

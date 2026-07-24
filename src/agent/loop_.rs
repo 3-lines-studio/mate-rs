@@ -16,7 +16,7 @@ impl super::AgentSession {
         let loop_start = std::time::Instant::now();
         self.working_messages.clear();
         self.subagents_state.subagent_turns.clear();
-        let parent_id = self.sess.current_turn.clone();
+        let mut parent_id = self.sess.current_turn.clone();
 
         self.working_messages.push(Message {
             role: Role::User,
@@ -30,7 +30,7 @@ impl super::AgentSession {
         });
 
         let t0 = std::time::Instant::now();
-        let ancestry_msgs = {
+        let mut ancestry_msgs = {
             let turns_result = {
                 let mut store = self.store.lock().await;
                 store
@@ -89,6 +89,9 @@ impl super::AgentSession {
                             &msg_reasoning,
                             &result.reasoning_details,
                         );
+                        ancestry_msgs.extend_from_slice(&self.working_messages);
+                        self.commit_turn(&parent_id).await;
+                        parent_id = self.sess.current_turn.clone();
                         continue;
                     }
 
@@ -119,6 +122,9 @@ impl super::AgentSession {
                     return;
                 }
                 Err(e) => {
+                    if working_has_progress(&self.working_messages) {
+                        self.commit_turn(&parent_id).await;
+                    }
                     if e.retryable() {
                         let _ = events.send(Event::retry_available(&e.to_string())).await;
                     } else {
@@ -151,7 +157,7 @@ impl super::AgentSession {
         ChatRequest {
             messages: msgs,
             tools: self.cached_tool_defs.clone(),
-            session_id: self.sess.id.clone(),
+            session_id: self.api_session_id.clone(),
             ..Default::default()
         }
     }
@@ -256,7 +262,7 @@ impl super::AgentSession {
                         has_tool_calls = true;
                         result.tool_calls.push(call);
                     }
-                    StreamEvent::Usage { usage } => {
+                    StreamEvent::Usage { mut usage } => {
                         self.sess.prompt_tokens += usage.prompt_tokens;
                         self.sess.completion_tokens += usage.completion_tokens;
                         self.sess.context_tokens = usage.total_tokens;
@@ -264,7 +270,9 @@ impl super::AgentSession {
                             self.sess.context_tokens =
                                 usage.prompt_tokens + usage.completion_tokens;
                         }
-                        self.sess.cost += self.client.cost_for(&usage);
+                        let cost = self.client.cost_for(&usage);
+                        self.sess.cost += cost;
+                        usage.cost = cost;
                         let _ = events.send(Event::usage_ev(usage)).await;
                     }
                     StreamEvent::ReasoningDetails { details } => {
@@ -285,9 +293,12 @@ impl super::AgentSession {
     }
 
     async fn commit_turn(&mut self, parent_id: &str) {
+        if self.working_messages.is_empty() {
+            return;
+        }
+
         if self.subagents_state.is_subagent {
-            self.captured_msgs = self.working_messages.clone();
-            self.working_messages.clear();
+            self.captured_msgs.append(&mut self.working_messages);
             return;
         }
 
@@ -317,6 +328,7 @@ impl super::AgentSession {
                 };
                 let _ = store.commit_turn(&self.sess.id, &sub_turn);
             }
+            self.subagents_state.subagent_turns.clear();
         }
 
         self.sess.current_turn = turn_id;
@@ -341,6 +353,10 @@ impl super::AgentSession {
 
         self.working_messages.clear();
     }
+}
+
+fn working_has_progress(messages: &[Message]) -> bool {
+    messages.iter().any(|m| m.role != Role::User)
 }
 
 fn assistant_msg(

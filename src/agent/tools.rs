@@ -1,7 +1,7 @@
 use super::format::format_duration;
 use super::types::{DelegateData, Event, EventKind, PendingTool, SubagentDef, SubagentTurn};
 use crate::message::{Message, Role, ToolCall, ToolDef};
-use crate::provider::StreamToolCall;
+use crate::provider::{StreamToolCall, Usage};
 use crate::session::store::Store;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -44,6 +44,7 @@ impl super::AgentSession {
             })
             .collect();
         let mut deferred_errors: Vec<Event> = Vec::new();
+        let mut subagent_cost = 0.0;
 
         while let Some(result) = set.join_next().await {
             if let Ok((i, result_str, dur, is_error, delegate_data)) = result {
@@ -61,6 +62,7 @@ impl super::AgentSession {
                     self.sess.prompt_tokens += dd.prompt_tokens;
                     self.sess.completion_tokens += dd.completion_tokens;
                     self.sess.cost += dd.cost;
+                    subagent_cost += dd.cost;
                     self.subagents_state.subagent_turns.push(SubagentTurn {
                         msgs: dd.msgs,
                         subagent: dd.subagent_id,
@@ -68,6 +70,20 @@ impl super::AgentSession {
                     });
                 }
             }
+        }
+
+        if subagent_cost > 0.0 {
+            let _ = events
+                .send(Event::usage_ev(Usage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    prompt_cache_hit_tokens: 0,
+                    prompt_tokens_details: None,
+                    completion_tokens_details: None,
+                    cost: subagent_cost,
+                }))
+                .await;
         }
 
         for ev in deferred_errors {
@@ -259,7 +275,8 @@ fn run_delegate(
             task_text.push_str(&params.context);
         }
 
-        let mut sub = super::AgentSession::new_subagent(store, sess_id, &def, max_rounds, cwd);
+        let mut sub =
+            super::AgentSession::new_subagent(store, sess_id, &def, max_rounds, cwd, &tc.id);
 
         let (event_tx, mut event_rx) = mpsc::channel(100);
         let sub_id = def.id.clone();
@@ -369,23 +386,31 @@ pub(super) fn build_delegate_def(
         }
     }
 
-    let mut params = HashMap::new();
-    params.insert("type".into(), serde_json::json!("object"));
-    let mut props: HashMap<String, serde_json::Value> = HashMap::new();
-    props.insert(
-        "subagent".into(),
-        serde_json::json!({
-            "type": "string", "enum": names, "description": desc
-        }),
+    let params = crate::tools::object_schema(
+        &[
+            (
+                "subagent",
+                serde_json::json!({
+                    "type": "string", "enum": names, "description": desc
+                }),
+            ),
+            (
+                "task",
+                serde_json::json!({
+                    "type": "string",
+                    "description": "The task for the subagent. Be specific and include all necessary details."
+                }),
+            ),
+            (
+                "context",
+                serde_json::json!({
+                    "type": "string",
+                    "description": "Additional context (file contents, requirements, constraints). Optional."
+                }),
+            ),
+        ],
+        &["subagent", "task"],
     );
-    props.insert("task".into(), serde_json::json!({
-        "type": "string", "description": "The task for the subagent. Be specific and include all necessary details."
-    }));
-    props.insert("context".into(), serde_json::json!({
-        "type": "string", "description": "Additional context (file contents, requirements, constraints). Optional."
-    }));
-    params.insert("properties".into(), serde_json::json!(props));
-    params.insert("required".into(), serde_json::json!(["subagent", "task"]));
 
     ToolDef {
         def_type: "function".into(),

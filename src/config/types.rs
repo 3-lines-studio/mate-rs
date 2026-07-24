@@ -30,6 +30,8 @@ pub struct ModelConfig {
     pub output_price: f64,
     #[serde(default)]
     pub prompt_cache: bool,
+    #[serde(default)]
+    pub cache_ttl: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

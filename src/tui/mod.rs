@@ -122,6 +122,8 @@ impl App {
             }
         }
 
+        crate::herdr::shutdown();
+
         execute!(
             std::io::stdout(),
             DisableBracketedPaste,
@@ -660,6 +662,7 @@ impl App {
         if let Some(ref mut asession) = self.chat.active_session {
             let id = asession.sess().id;
             if let Ok(sess) = self.deps.store.load(&id) {
+                self.chat.total_cost = sess.cost;
                 asession.reload_from(sess);
                 self.chat.total_tokens = asession.context_tokens();
             }

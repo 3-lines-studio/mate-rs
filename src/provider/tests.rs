@@ -71,6 +71,50 @@ fn test_client_pricing() {
 }
 
 #[test]
+fn test_apply_profile_keeps_session_id_and_sets_cache() {
+    let mut req = ChatRequest {
+        session_id: "sess-keep".to_string(),
+        ..Default::default()
+    };
+    apply_profile(
+        &mut req,
+        &ModelProfile {
+            prompt_cache: true,
+            cache_ttl: "1h".to_string(),
+            open_router: false,
+            reasoning_effort: "high".to_string(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(req.session_id, "sess-keep");
+    assert_eq!(req.reasoning_effort, "high");
+    let cc = req.cache_control.expect("cache_control");
+    assert_eq!(cc.cc_type, "ephemeral");
+    assert_eq!(cc.ttl, "1h");
+}
+
+#[test]
+fn test_apply_profile_openrouter_reasoning_keeps_session_id() {
+    let mut req = ChatRequest {
+        session_id: "or-sess".to_string(),
+        ..Default::default()
+    };
+    apply_profile(
+        &mut req,
+        &ModelProfile {
+            open_router: true,
+            reasoning_effort: "medium".to_string(),
+            prompt_cache: false,
+            ..Default::default()
+        },
+    );
+    assert_eq!(req.session_id, "or-sess");
+    assert!(req.cache_control.is_none());
+    assert!(req.reasoning_effort.is_empty());
+    assert_eq!(req.reasoning.as_ref().unwrap().effort, "medium");
+}
+
+#[test]
 fn test_client_model_and_context() {
     let c = Client::new(
         "http://localhost",

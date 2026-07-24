@@ -170,13 +170,9 @@ pub fn apply_profile(req: &mut ChatRequest, profile: &ModelProfile) {
     }
 
     if profile.prompt_cache {
-        let cc = CacheControl {
+        req.cache_control = Some(CacheControl {
             cc_type: "ephemeral".to_string(),
-            ttl: String::new(),
-        };
-        req.cache_control = Some(cc);
-    }
-    if !profile.open_router {
-        req.session_id = String::new();
+            ttl: profile.cache_ttl.clone(),
+        });
     }
 }

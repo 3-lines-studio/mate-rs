@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize, Serializer};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -133,7 +133,7 @@ pub struct ToolDef {
 pub struct ToolDefFunction {
     pub name: String,
     pub description: String,
-    pub parameters: HashMap<String, serde_json::Value>,
+    pub parameters: BTreeMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]

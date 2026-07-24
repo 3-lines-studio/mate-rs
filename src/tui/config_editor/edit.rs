@@ -240,6 +240,7 @@ impl super::ConfigScreen {
                     cached_input_price: 0.0,
                     output_price: 0.0,
                     prompt_cache: false,
+                    cache_ttl: String::new(),
                 });
             }
             6 => {

@@ -34,6 +34,7 @@ pub fn resolve_client(
         cached_input_price: m.cached_input_price,
         output_price: m.output_price,
         prompt_cache: m.prompt_cache,
+        cache_ttl: m.cache_ttl.clone(),
     };
 
     let mut client = Client::new(&p.base_url, &m.name, &p.api_key, profile);
